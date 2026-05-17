@@ -47,6 +47,11 @@ impl Square {
         (square / 8, square % 8)
     }
 
+    /// Returns the rank of the given square
+    pub fn rank(self) -> u8 {
+        self as u8 / 8
+    }
+
     /// Converts the given square into fen notation (equivalent to to_string in this case)
     pub fn to_fen(self) -> String {
         self.to_string()
@@ -86,7 +91,7 @@ impl ToString for Square {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Piece {
     WhitePawn,
-    WhiteKinght,
+    WhiteKnight,
     WhiteBishop,
     WhiteRook,
     WhiteQueen,
@@ -104,7 +109,7 @@ impl Piece {
     /// Array of all pieces
     pub const ALL: [Self; 12] = [
         Piece::WhitePawn,
-        Piece::WhiteKinght,
+        Piece::WhiteKnight,
         Piece::WhiteBishop,
         Piece::WhiteRook,
         Piece::WhiteQueen,
@@ -120,7 +125,7 @@ impl Piece {
     /// Array of all white pieces
     pub const WHITE: [Self; 6] = [
         Piece::WhitePawn,
-        Piece::WhiteKinght,
+        Piece::WhiteKnight,
         Piece::WhiteBishop,
         Piece::WhiteRook,
         Piece::WhiteQueen,
@@ -138,7 +143,7 @@ impl Piece {
     ];
 
     pub const PAWNS:   [Self; 2] = [Piece::WhitePawn,   Piece::BlackPawn];
-    pub const KNIGHTS: [Self; 2] = [Piece::WhiteKinght, Piece::BlackKnight];
+    pub const KNIGHTS: [Self; 2] = [Piece::WhiteKnight, Piece::BlackKnight];
     pub const BISHOPS: [Self; 2] = [Piece::WhiteBishop, Piece::BlackBishop];
     pub const ROOKS:   [Self; 2] = [Piece::WhiteRook,   Piece::BlackRook];
     pub const QUEENS:  [Self; 2] = [Piece::WhiteQueen,  Piece::BlackQueen];
@@ -150,6 +155,7 @@ impl Piece {
     pub fn rook(side: Side) -> Self { Piece::ROOKS[side as usize] }
     pub fn queen(side: Side) -> Self { Piece::QUEENS[side as usize] }
     pub fn king(side: Side) -> Self { Piece::KINGS[side as usize] }
+    pub fn of_side(side: Side) -> [Self; 6] { if side == Side::White { Piece::WHITE } else { Piece::BLACK }}
 
     pub fn side(self) -> Side {
         if self as u8 <= 5 {
@@ -162,7 +168,7 @@ impl Piece {
     pub fn from_fen(s: &str) -> Self {
         match s {
             "P" => Piece::WhitePawn,   "p" => Piece::BlackPawn,
-            "N" => Piece::WhiteKinght, "n" => Piece::BlackKnight,
+            "N" => Piece::WhiteKnight, "n" => Piece::BlackKnight,
             "B" => Piece::WhiteBishop, "b" => Piece::BlackBishop,
             "R" => Piece::WhiteRook,   "r" => Piece::BlackRook,
             "Q" => Piece::WhiteQueen,  "q" => Piece::BlackQueen,
@@ -175,7 +181,7 @@ impl Piece {
     pub fn to_unicode(self) -> String {
         match self {
             Piece::WhitePawn   => "♙",
-            Piece::WhiteKinght => "♘",
+            Piece::WhiteKnight => "♘",
             Piece::WhiteBishop => "♗",
             Piece::WhiteRook   => "♖",
             Piece::WhiteQueen  => "♕",
@@ -193,7 +199,7 @@ impl Piece {
     pub fn to_ascii(self) -> String {
         match self {
             Piece::WhitePawn   => "P",
-            Piece::WhiteKinght => "N",
+            Piece::WhiteKnight => "N",
             Piece::WhiteBishop => "B",
             Piece::WhiteRook   => "R",
             Piece::WhiteQueen  => "Q",
@@ -305,6 +311,17 @@ impl Board {
     /// Returns the starting position of a regular game of chess
     pub fn starting_position() -> Self {
         Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    }
+
+    /// Returns the piece at the given square, or None if empty.
+    /// Note: this method is slow. Should not be used in engine.
+    pub fn piece_at(&self, square: Square) -> Option<Piece> {
+        for piece in Piece::ALL {
+            if self.pieces[piece as usize] & (1 << square as u8) != 0{
+                return Some(piece);
+            }
+        }
+        return None;
     }
 
     /// Returns the queenside/kingside castling rights for the given side
