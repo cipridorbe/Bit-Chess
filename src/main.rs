@@ -1,7 +1,9 @@
 mod util;
 mod bitboard;
 mod movegen;
+mod frontend;
 
-fn main() {
-    println!("Hello, world!");
+#[tokio::main]
+async fn main() {
+    frontend::run().await;
 }

@@ -265,6 +265,7 @@ impl Side {
 ================================================================================
 */
 
+#[derive(Clone)]
 pub struct Board {
     /// Bitboards for each piece, indexed by `Piece`
     pub(crate) pieces: [u64; 12],
