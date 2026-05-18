@@ -9,7 +9,7 @@ GAMES=50
 OUTPUT="results.pgn"
 
 # ── Engine settings ────────────────────────────────────────────────────────────
-BITCHESS_DEPTH=4
+BITCHESS_DEPTH=6
 STOCKFISH_DEPTH=15
 STOCKFISH_ELO=1500   # min 1320, max 3190
 

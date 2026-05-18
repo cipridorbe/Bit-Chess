@@ -54,7 +54,7 @@ fn main() {
                 }
             }
             "go" => {
-                let mut depth = 4u8;
+                let mut depth = 6u8;
                 let mut i = 1;
                 while i < tokens.len() {
                     if tokens[i] == "depth" {

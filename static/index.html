@@ -369,12 +369,26 @@
       const optimistic = fenToMap(state.fen);
       const side = state.fen.split(' ')[1];
       let piece = optimistic[from];
+      const isEnPassant = (piece === 'P' || piece === 'p') && from[0] !== to[0] && !optimistic[to];
       delete optimistic[from];
       if (uci.length === 5) {
         const p = uci[4];
         piece = side === 'w' ? p.toUpperCase() : p;
       }
       optimistic[to] = piece;
+      // Castling: also move the rook
+      if (piece === 'K') {
+        if (from === 'e1' && to === 'g1') { optimistic['f1'] = 'R'; delete optimistic['h1']; }
+        else if (from === 'e1' && to === 'c1') { optimistic['d1'] = 'R'; delete optimistic['a1']; }
+      } else if (piece === 'k') {
+        if (from === 'e8' && to === 'g8') { optimistic['f8'] = 'r'; delete optimistic['h8']; }
+        else if (from === 'e8' && to === 'c8') { optimistic['d8'] = 'r'; delete optimistic['a8']; }
+      }
+      // En passant: remove the captured pawn
+      if (isEnPassant) {
+        const capturedRank = side === 'w' ? String(+to[1] - 1) : String(+to[1] + 1);
+        delete optimistic[to[0] + capturedRank];
+      }
       renderBoard(optimistic);
 
       const res = await fetch('/api/move', {
@@ -383,6 +397,9 @@
         body: JSON.stringify({ uci }),
       });
       state = await res.json();
+      if (state.last_move) {
+        lastMove = { from: state.last_move.slice(0, 2), to: state.last_move.slice(2, 4) };
+      }
       botThinking = false;
       buildCoords();
       updateStatus();
@@ -440,6 +457,9 @@
         body: JSON.stringify({ side }),
       });
       state = await res.json();
+      if (state.last_move) {
+        lastMove = { from: state.last_move.slice(0, 2), to: state.last_move.slice(2, 4) };
+      }
       buildCoords();
       updateStatus();
       renderBoard();
