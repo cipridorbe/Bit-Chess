@@ -4,7 +4,7 @@ Implementation of negamax, used as the main search algorithm.
 
 use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{is_in_check_after_move, make_move, unmake_move}, r#move::Move}};
 
-pub fn search(board: &Board) -> Option<Move> {
+pub fn search(board: &Board, depth: u8) -> Option<Move> {
     let mut board = board.clone();
     let mut best_score = f32::NEG_INFINITY;
     let mut best_move = None;
@@ -15,7 +15,7 @@ pub fn search(board: &Board) -> Option<Move> {
             unmake_move(&mut board, mv, unmake);
             continue;
         }
-        let score = -negamax(&mut board, f32::NEG_INFINITY, f32::INFINITY, 4);
+        let score = -negamax(&mut board, f32::NEG_INFINITY, f32::INFINITY, depth);
         unmake_move(&mut board, mv, unmake);
         if score > best_score {
             best_score = score;
