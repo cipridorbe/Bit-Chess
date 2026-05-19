@@ -22,6 +22,7 @@ struct AppState {
     board: Board,
     player_side: Side,
     tt: TT,
+    history: Box<[[i16; 64]; 64]>,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -62,7 +63,7 @@ async fn post_move(
     let mut last_move = None;
     if guard.board.side != guard.player_side {
         let s = &mut *guard;
-        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt) {
+        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt, &mut s.history) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut guard.board, bot_mv);
         }
@@ -113,7 +114,7 @@ async fn new_game(
     let mut last_move = None;
     if guard.player_side == Side::Black {
         let s = &mut *guard;
-        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt) {
+        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt, &mut s.history) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut guard.board, bot_mv);
         }
@@ -127,6 +128,7 @@ pub async fn run() {
         board: Board::starting_position(),
         player_side: Side::White,
         tt: TT::new(22, 2),
+        history: Box::new([[0; 64]; 64]),
     }));
 
     let app = Router::new()
