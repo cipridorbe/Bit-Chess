@@ -15,12 +15,13 @@ use crate::{
         makemove::{is_in_check_after_move, make_move},
         r#move::Move,
     },
-    search::search,
+    search::{search, tt::TT},
 };
 
 struct AppState {
     board: Board,
     player_side: Side,
+    tt: TT,
 }
 
 type SharedState = Arc<Mutex<AppState>>;
@@ -46,27 +47,28 @@ struct NewGameRequest {
 }
 
 async fn get_state(State(state): State<SharedState>) -> Json<GameState> {
-    let state = state.lock().unwrap();
-    Json(compute_state(&state.board, state.player_side, None))
+    let guard = state.lock().unwrap();
+    Json(compute_state(&guard.board, guard.player_side, None))
 }
 
 async fn post_move(
     State(state): State<SharedState>,
     Json(req): Json<MoveRequest>,
 ) -> Json<GameState> {
-    let mut state = state.lock().unwrap();
-    let mv = Move::from_uci(&state.board, &req.uci);
-    make_move(&mut state.board, mv);
+    let mut guard = state.lock().unwrap();
+    let mv = Move::from_uci(&guard.board, &req.uci);
+    make_move(&mut guard.board, mv);
 
     let mut last_move = None;
-    if state.board.side != state.player_side {
-        if let Some(bot_mv) = search(&mut state.board, 6) {
+    if guard.board.side != guard.player_side {
+        let s = &mut *guard;
+        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt) {
             last_move = Some(bot_mv.to_uci());
-            make_move(&mut state.board, bot_mv);
+            make_move(&mut guard.board, bot_mv);
         }
     }
 
-    Json(compute_state(&state.board, state.player_side, last_move))
+    Json(compute_state(&guard.board, guard.player_side, last_move))
 }
 
 fn compute_state(board: &Board, player_side: Side, last_move: Option<String>) -> GameState {
@@ -104,25 +106,27 @@ async fn new_game(
     State(state): State<SharedState>,
     Json(req): Json<NewGameRequest>,
 ) -> Json<GameState> {
-    let mut state = state.lock().unwrap();
-    state.board = Board::starting_position();
-    state.player_side = if req.side == "w" { Side::White } else { Side::Black };
+    let mut guard = state.lock().unwrap();
+    guard.board = Board::starting_position();
+    guard.player_side = if req.side == "w" { Side::White } else { Side::Black };
 
     let mut last_move = None;
-    if state.player_side == Side::Black {
-        if let Some(bot_mv) = search(&mut state.board, 6) {
+    if guard.player_side == Side::Black {
+        let s = &mut *guard;
+        if let Some(bot_mv) = search(&mut s.board, 6, &mut s.tt) {
             last_move = Some(bot_mv.to_uci());
-            make_move(&mut state.board, bot_mv);
+            make_move(&mut guard.board, bot_mv);
         }
     }
 
-    Json(compute_state(&state.board, state.player_side, last_move))
+    Json(compute_state(&guard.board, guard.player_side, last_move))
 }
 
 pub async fn run() {
     let state = Arc::new(Mutex::new(AppState {
         board: Board::starting_position(),
         player_side: Side::White,
+        tt: TT::new(22),
     }));
 
     let app = Router::new()

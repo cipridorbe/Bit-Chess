@@ -4,12 +4,13 @@ use bitchess::{
     bitboard::Board,
     movegen::makemove::make_move,
     movegen::r#move::Move,
-    search::search,
+    search::{search, tt::TT},
 };
 
 fn main() {
     let stdin = io::stdin();
     let mut board = Board::starting_position();
+    let mut tt = TT::new(22);
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
@@ -66,7 +67,7 @@ fn main() {
                         i += 1;
                     }
                 }
-                match search(&mut board, depth) {
+                match search(&mut board, depth, &mut tt) {
                     Some(mv) => print!("bestmove {}\n", mv.to_uci()),
                     None => print!("bestmove 0000\n"),
                 }
