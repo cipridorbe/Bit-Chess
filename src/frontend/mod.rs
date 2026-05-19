@@ -71,7 +71,7 @@ async fn post_move(
 
 fn compute_state(board: &Board, player_side: Side, last_move: Option<String>) -> GameState {
     let fen = board.to_fen();
-    let pseudo_legal = generate_movelist(board);
+    let pseudo_legal = generate_movelist(board, false);
     let legal_moves: Vec<String> = pseudo_legal
         .iter()
         .filter(|mv| {
