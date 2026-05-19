@@ -10,7 +10,7 @@ use bitchess::{
 fn main() {
     let stdin = io::stdin();
     let mut board = Board::starting_position();
-    let mut tt = TT::new(22);
+    let mut tt = TT::new(22, 2);
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
