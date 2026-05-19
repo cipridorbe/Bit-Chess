@@ -5,32 +5,32 @@ Generates the list of all pseudo-legal moves in a given chess position.
 use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{all_attacks, can_castle, single_bishop_attacks, single_queen_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}, tables::{KING_ATTACKS, KNIGHT_ATTACKS, PAWN_ATTACKS}}, util::squares};
 
 /// Generates all pseudo-legal moves from the given board state.
-pub fn generate_movelist(board: &Board) -> MoveList {
+pub fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     let mut movelist = MoveList::new();
     let side = board.side;
-    generate_pawn_movelist(&mut movelist, board);
-    generate_piece_movelist(&mut movelist, board, Piece::knight(side), 
+    generate_pawn_movelist(&mut movelist, board, captures_only);
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::knight(side), 
     |square, _| KNIGHT_ATTACKS[square as usize]
     );
-    generate_piece_movelist(&mut movelist, board, Piece::king(side), 
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::king(side), 
     |square, _| KING_ATTACKS[square as usize]
     );
-    generate_piece_movelist(&mut movelist, board, Piece::rook(side), 
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::rook(side), 
         single_rook_attacks
     );
-    generate_piece_movelist(&mut movelist, board, Piece::bishop(side), 
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::bishop(side), 
         single_bishop_attacks
     );
-    generate_piece_movelist(&mut movelist, board, Piece::queen(side), 
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::queen(side), 
         single_queen_attacks
     );
-    generate_castling_movelist(&mut movelist, board);
+    generate_castling_movelist(&mut movelist, board, captures_only);
 
     movelist
 }
 
 /// Generates and appends all pawn moves
-fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
+fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, captures_only: bool) {
     let side = board.side;
     let occupancy_other = board.sides[side.other() as usize];
     let occupancy = board.occupied;
@@ -44,41 +44,43 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
         for square in squares(attacks) {
             if (1 << square as u8) & (Board::RANK_1 | Board::RANK_8) != 0 {
                 // Promotion
-                movelist.add(Move::new(Flag::ROOKPROMCAP, piece, square, pawn));
-                movelist.add(Move::new(Flag::KNIGHTPROMCAP, piece, square, pawn));
-                movelist.add(Move::new(Flag::BISHOPPROMCAP, piece, square, pawn));
-                movelist.add(Move::new(Flag::QUEENPROMCAP, piece, square, pawn));
+                movelist.add(Move::new(Flag::ROOKPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::KNIGHTPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::BISHOPPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::QUEENPROMCAP, square, pawn));
             } else {
                 // Regular capture
-                movelist.add(Move::new(Flag::CAPTURE, piece, square, pawn));
+                movelist.add(Move::new(Flag::CAPTURE, square, pawn));
             }
         }
         // Quiet move and double pawn push
-        let push_square = if side == Side::White {
-            pawn as u8 + 8
-        } else {
-            pawn as u8 - 8
-        };
-        if (1 << push_square) & occupancy == 0 {
-            let target = unsafe { std::mem::transmute(push_square) };
-            movelist.add(Move::new(Flag::QUIET, piece, target, pawn));
-            if (1 << target as u8) & (Board::RANK_1 | Board::RANK_8) != 0 {
-                // promotion
-                movelist.remove_last();
-                movelist.add(Move::new(Flag::ROOKPROM, piece, target, pawn));
-                movelist.add(Move::new(Flag::KNIGHTPROM, piece, target, pawn));
-                movelist.add(Move::new(Flag::BISHOPPROM, piece, target, pawn));
-                movelist.add(Move::new(Flag::QUEENPROM, piece, target, pawn));
-            } else if (1 << pawn as u8) & (Board::RANK_2 | Board::RANK_7) != 0 {
-                // double pawn push
-                let double_push_square = if side == Side::White {
-                    pawn as u8 + 16
-                } else {
-                    pawn as u8 - 16
-                };
-                if (1 << double_push_square) & occupancy == 0 {
-                    let double_push_target = unsafe { std::mem::transmute(double_push_square) };
-                    movelist.add(Move::new(Flag::PAWNPUSH, piece, double_push_target, pawn));
+        if !captures_only {
+            let push_square = if side == Side::White {
+                pawn as u8 + 8
+            } else {
+                pawn as u8 - 8
+            };
+            if (1 << push_square) & occupancy == 0 {
+                let target = unsafe { std::mem::transmute(push_square) };
+                movelist.add(Move::new(Flag::QUIET, target, pawn));
+                if (1 << target as u8) & (Board::RANK_1 | Board::RANK_8) != 0 {
+                    // promotion
+                    movelist.remove_last();
+                    movelist.add(Move::new(Flag::ROOKPROM, target, pawn));
+                    movelist.add(Move::new(Flag::KNIGHTPROM, target, pawn));
+                    movelist.add(Move::new(Flag::BISHOPPROM, target, pawn));
+                    movelist.add(Move::new(Flag::QUEENPROM, target, pawn));
+                } else if (1 << pawn as u8) & (Board::RANK_2 | Board::RANK_7) != 0 {
+                    // double pawn push
+                    let double_push_square = if side == Side::White {
+                        pawn as u8 + 16
+                    } else {
+                        pawn as u8 - 16
+                    };
+                    if (1 << double_push_square) & occupancy == 0 {
+                        let double_push_target = unsafe { std::mem::transmute(double_push_square) };
+                        movelist.add(Move::new(Flag::PAWNPUSH, double_push_target, pawn));
+                    }
                 }
             }
         }
@@ -88,13 +90,13 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
     if let Some(enpsasant) = board.enpassant {
         let enpassant_attacks = PAWN_ATTACKS[side.other() as usize][enpsasant as usize];
         for square in squares(enpassant_attacks & pawns) {
-            movelist.add(Move::new(Flag::ENPASSANT, piece, enpsasant, square));
+            movelist.add(Move::new(Flag::ENPASSANT, enpsasant, square));
         }
     }
 }
 
 /// Generates and appends all moves for the given piece
-fn generate_piece_movelist(movelist: &mut MoveList, board: &Board, piece: Piece, attacks: impl Fn(Square, u64) -> u64) {
+fn generate_piece_movelist(movelist: &mut MoveList, board: &Board, captures_only: bool, piece: Piece, attacks: impl Fn(Square, u64) -> u64) {
     let side = board.side;
     let occupancy_other = board.sides[side.other() as usize];
     let occupancy = board.occupied;
@@ -103,17 +105,22 @@ fn generate_piece_movelist(movelist: &mut MoveList, board: &Board, piece: Piece,
         let moves = attacks(square, occupancy);
         // attacks
         for target in squares(moves & occupancy_other) {
-            movelist.add(Move::new(Flag::CAPTURE, piece, target, square));
+            movelist.add(Move::new(Flag::CAPTURE, target, square));
         }
         // Non-attacks
-        for target in squares(moves & !occupancy) {
-            movelist.add(Move::new(Flag::QUIET, piece, target, square));
+        if !captures_only {
+            for target in squares(moves & !occupancy) {
+                movelist.add(Move::new(Flag::QUIET, target, square));
+            }
         }
     }
 }
 
 /// Generates and appends all castling moves
-fn generate_castling_movelist(movelist: &mut MoveList, board: &Board) {
+fn generate_castling_movelist(movelist: &mut MoveList, board: &Board, captures_only: bool) {
+    if captures_only {
+        return;
+    }
     let side = board.side;
     let (queenside, kingside) = board.castling_rights(board.side);
     if queenside || kingside {
@@ -124,14 +131,14 @@ fn generate_castling_movelist(movelist: &mut MoveList, board: &Board) {
                 Side::White => (Square::c1, Square::e1),
                 Side::Black => (Square::c8, Square::e8)
             };
-            movelist.add(Move::new(Flag::QUEENCASTLE, Piece::king(side), target, source));
+            movelist.add(Move::new(Flag::QUEENCASTLE, target, source));
         }
         if kinglegal && kingside {
             let (target, source) = match side {
                 Side::White => (Square::g1, Square::e1),
                 Side::Black => (Square::g8, Square::e8)
             };
-            movelist.add(Move::new(Flag::KINGCASTLE, Piece::king(side), target, source));
+            movelist.add(Move::new(Flag::KINGCASTLE, target, source));
         }
     }
 }

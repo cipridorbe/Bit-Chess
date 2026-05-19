@@ -8,7 +8,7 @@ pub fn perft(board: &Board, depth: u32) -> u64 {
     let mut board= board.clone();
     if depth == 0 { return 1; }
     let mut out = 0;
-    for mv in generate_movelist(&board).iter() {
+    for mv in generate_movelist(&board, false).iter() {
         let unmake = make_move(&mut board, mv);
         if !is_in_check_after_move(&board) {
             out += perft(&board, depth - 1);
@@ -29,7 +29,7 @@ mod tests {
     fn perft_divide(board: &Board, depth: u32) {
         use crate::movegen::{generator::generate_movelist, makemove::{make_move, is_in_check_after_move}};
         let mut total = 0u64;
-        for mv in generate_movelist(board).iter() {
+        for mv in generate_movelist(board, false).iter() {
             let mut copy = board.clone();
             make_move(&mut copy, mv);
             if !is_in_check_after_move(&copy) {

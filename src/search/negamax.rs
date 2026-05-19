@@ -4,19 +4,24 @@ Implementation of negamax, used as the main search algorithm.
 
 use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{is_in_check_after_move, make_move, unmake_move}, r#move::Move}};
 
-pub fn search(board: &Board, depth: u8) -> Option<Move> {
-    let mut board = board.clone();
+pub fn search(board: &mut Board,depth: u8) -> Option<Move> {
     let mut best_score = f32::NEG_INFINITY;
     let mut best_move = None;
 
-    for mv in generate_movelist(&board).iter() {
-        let unmake = make_move(&mut board, mv);
+    let mut movelist = generate_movelist(&board);
+    movelist.sort_mvvlva(&board);
+    for mv in movelist.iter() {
+        let unmake = make_move(board, mv);
         if is_in_check_after_move(&board) {
-            unmake_move(&mut board, mv, unmake);
+            unmake_move(board, mv, unmake);
             continue;
         }
-        let score = -negamax(&mut board, f32::NEG_INFINITY, f32::INFINITY, depth);
-        unmake_move(&mut board, mv, unmake);
+        let score = if board.is_rule_draw() {
+            0.
+        } else {
+            -negamax(board, f32::NEG_INFINITY, f32::INFINITY, depth)
+        };
+        unmake_move(board, mv, unmake);
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
@@ -31,7 +36,8 @@ pub fn negamax(board: &mut Board, mut alpha: f32, beta: f32, depth: u8) -> f32 {
         return relative_eval(board);
     }
 
-    let movelist = generate_movelist(board);
+    let mut movelist = generate_movelist(board);
+    movelist.sort_mvvlva(board);
     let mut value = f32::MIN;
     let mut moved = false;
     for mv in movelist.iter() {
@@ -41,7 +47,11 @@ pub fn negamax(board: &mut Board, mut alpha: f32, beta: f32, depth: u8) -> f32 {
             continue;
         }
         moved = true;
-        let score = -negamax(board, -beta, -alpha, depth - 1);
+        let score = if board.is_rule_draw() {
+            0.
+        } else {
+            -negamax(board, -beta, -alpha, depth - 1)
+        };
         unmake_move(board, mv, unmake);
         value = f32::max(value, score);
         alpha = f32::max(alpha, value);
