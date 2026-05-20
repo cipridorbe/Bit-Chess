@@ -51,7 +51,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     let mut predicted_best_move = None;
     if let Some(entry) = state.tt.find(board.hash) {
         predicted_best_move = entry.best_move;
-        if entry.depth >= depth {
+        if entry.depth >= depth && board.repetitions <= 1 {
             match entry.flag {
                 TTFlag::Exact => {
                     if entry.score.abs() > MATE_CUTOFF {
@@ -118,7 +118,9 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     } else {
         TTFlag::Upper
     };
-    state.tt.insert(TTEntry::new(board.hash, depth, value, flag, best_move, board.fullmoves, state.tt.generation));
+    if board.repetitions <= 1 {
+        state.tt.insert(TTEntry::new(board.hash, depth, value, flag, best_move, board.fullmoves, state.tt.generation));
+    }
     value
 }
 

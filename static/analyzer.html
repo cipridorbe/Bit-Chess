@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bitchess Analyzer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chess.js@0.13.4/chess.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 16px;
+      gap: 16px;
+    }
+
+    h1 { font-size: 1.8rem; letter-spacing: 3px; color: #d4af37; }
+
+    /* ── Main layout ────────────────────────────────── */
+    .main-view { display: flex; flex-direction: column; gap: 14px; align-items: center; width: 100%; }
+    .board-and-panel { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; justify-content: center; }
+
+    /* ── Board ──────────────────────────────────────── */
+    .board-outer { display: flex; flex-direction: column; gap: 5px; }
+    .board-row { display: flex; gap: 6px; align-items: stretch; }
+    .rank-labels { display: flex; flex-direction: column; justify-content: space-around; width: 18px; }
+    .rank-label { font-size: 14px; font-weight: 700; color: #b0b0cc; text-align: center; flex: 1; display: flex; align-items: center; justify-content: center; }
+    .file-labels { display: flex; margin-left: calc(18px + 6px); width: min(72vmin, 480px); }
+    .file-label { flex: 1; font-size: 14px; font-weight: 700; color: #b0b0cc; text-align: center; }
+    .board { display: grid; grid-template-columns: repeat(8, 1fr); grid-template-rows: repeat(8, 1fr); width: min(72vmin, 480px); height: min(72vmin, 480px); border: 3px solid #5a3a1a; box-shadow: 0 12px 40px rgba(0,0,0,0.6); flex-shrink: 0; }
+    .sq { display: flex; justify-content: center; align-items: center; }
+    .sq img { width: 87%; height: 87%; object-fit: contain; pointer-events: none; filter: drop-shadow(1px 2px 3px rgba(0,0,0,0.45)); }
+    .sq.light { background: #f0d9b5; }
+    .sq.dark  { background: #b58863; }
+    .sq.last-from { background: rgba(255,215,0,0.40) !important; }
+    .sq.last-to   { background: rgba(255,215,0,0.60) !important; }
+
+    /* ── Nav controls ───────────────────────────────── */
+    .nav-row { display: flex; gap: 8px; justify-content: center; align-items: center; margin-top: 4px; }
+    .nav-btn { background: #2a2a4a; color: #d4af37; border: 1px solid #44446a; padding: 6px 13px; border-radius: 5px; font-size: 1rem; cursor: pointer; transition: background .1s; }
+    .nav-btn:hover { background: #3a3a5a; }
+    .move-counter { color: #7a7a9a; font-size: 0.85rem; min-width: 70px; text-align: center; }
+    .btn-outline { background: transparent; color: #d4af37; border: 1px solid #d4af37; padding: 5px 14px; border-radius: 5px; font-size: 0.85rem; cursor: pointer; }
+    .btn-outline:hover { background: rgba(212,175,55,0.1); }
+
+    /* ── Analysis panel ─────────────────────────────── */
+    .analysis-panel {
+      width: 330px;
+      height: min(72vmin, 480px);
+      background: #12122a;
+      border: 1px solid #3a3a5a;
+      border-radius: 8px;
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 11px;
+      font-size: 0.86rem;
+      color: #ccc;
+    }
+    .panel-header { font-size: 0.93rem; font-weight: 700; color: #d4af37; border-bottom: 1px solid #2e2e50; padding-bottom: 7px; }
+    .panel-section { display: flex; flex-direction: column; gap: 4px; }
+    .panel-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; color: #6a6a8a; }
+    .move-badge { font-family: monospace; font-size: 1.05rem; font-weight: 700; color: #d4af37; }
+    .eval-num { font-weight: 700; font-size: 1.15rem; }
+    .pos { color: #5ac044; } .neg { color: #e74c3c; } .dim { color: #5a5a7a; }
+    .match-ok  { color: #5ac044; font-size: 0.82rem; }
+    .match-bad { color: #e74c3c; font-size: 0.82rem; font-weight: 700; }
+    .divider { border: none; border-top: 1px solid #2e2e50; }
+    .tt-warn { color: #f0a030; font-size: 0.78rem; }
+
+    .tt-table, .hist-table {
+      width: 100%; border-collapse: collapse;
+      font-family: monospace; font-size: 0.78rem;
+    }
+    .tt-table th, .tt-table td,
+    .hist-table th, .hist-table td {
+      padding: 3px 5px; text-align: left;
+      border-bottom: 1px solid #1e1e38;
+    }
+    .tt-table th, .hist-table th { color: #6a6a8a; font-size: 0.7rem; }
+    .tt-table td:first-child { color: #8a8aaa; font-style: italic; }
+
+    /* ── Move list ──────────────────────────────────── */
+    .move-list {
+      display: flex; flex-wrap: wrap; gap: 1px 0;
+      max-width: 860px; width: 100%;
+      background: #12122a; border: 1px solid #3a3a5a;
+      border-radius: 8px; padding: 8px 10px;
+      max-height: 110px; overflow-y: auto; align-content: flex-start;
+    }
+    .mv-num { color: #6a6a8a; font-size: 0.8rem; padding: 3px 3px; min-width: 26px; }
+    .mv { font-family: monospace; font-size: 0.82rem; padding: 2px 5px; cursor: pointer; border-radius: 3px; color: #a0a0c0; }
+    .mv.engine { color: #c8b060; }
+    .mv:hover { background: #2a2a4a; }
+    .mv.active { background: #d4af37 !important; color: #1a1a2e !important; font-weight: 700; }
+    .mv.active-engine { background: #b89030 !important; color: #1a1a2e !important; font-weight: 700; }
+
+    /* ── Modals / input ─────────────────────────────── */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.82); justify-content: center; align-items: center; z-index: 10; }
+    .modal-overlay.show { display: flex; }
+    .modal { background: #1e1e38; border: 2px solid #d4af37; border-radius: 12px; padding: 28px; display: flex; flex-direction: column; gap: 15px; min-width: 440px; max-width: 560px; }
+    .modal h2 { color: #d4af37; font-size: 1.25rem; letter-spacing: 2px; }
+    .form-row { display: flex; flex-direction: column; gap: 6px; }
+    .form-row > span { color: #a0a0c0; font-size: 0.88rem; font-weight: 600; }
+    .radio-group { display: flex; gap: 18px; }
+    .radio-group label { display: flex; align-items: center; gap: 6px; color: #c0c0d8; font-size: 0.88rem; cursor: pointer; }
+    input[type=text], textarea { background: #12122a; border: 1px solid #3a3a5a; border-radius: 5px; color: #e0e0e0; padding: 8px 10px; font-family: monospace; font-size: 0.83rem; width: 100%; }
+    textarea { resize: vertical; min-height: 72px; }
+    input[type=text]:focus, textarea:focus { outline: none; border-color: #d4af37; }
+    .btn { background: #d4af37; color: #1a1a2e; border: none; padding: 10px 28px; border-radius: 6px; font-size: 1rem; font-weight: 700; cursor: pointer; }
+    .btn:hover { background: #e8c84a; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .error-msg  { color: #e74c3c; font-size: 0.84rem; display: none; }
+    .loading-msg { color: #d4af37; font-size: 0.88rem; display: none; }
+  </style>
+</head>
+<body>
+  <h1>BITCHESS ANALYZER</h1>
+
+  <div id="main-view" style="display:none" class="main-view">
+    <div class="board-and-panel">
+      <div class="board-outer">
+        <div class="board-row">
+          <div class="rank-labels" id="rank-labels"></div>
+          <div class="board" id="board"></div>
+        </div>
+        <div class="file-labels" id="file-labels"></div>
+        <div class="nav-row">
+          <button class="nav-btn" title="First" onclick="navigate(-9999)">⟪</button>
+          <button class="nav-btn" title="Previous" onclick="navigate(-1)">◀</button>
+          <span class="move-counter" id="move-counter"></span>
+          <button class="nav-btn" title="Next" onclick="navigate(1)">▶</button>
+          <button class="nav-btn" title="Last" onclick="navigate(9999)">⟫</button>
+          <button class="btn-outline" onclick="showInput()">New</button>
+        </div>
+      </div>
+      <div class="analysis-panel" id="analysis-panel">
+        <div class="dim">Loading…</div>
+      </div>
+    </div>
+    <div class="move-list" id="move-list"></div>
+  </div>
+
+  <!-- Input overlay -->
+  <div class="modal-overlay show" id="input-overlay">
+    <div class="modal">
+      <h2>LOAD GAME</h2>
+      <div class="form-row">
+        <span>Engine side</span>
+        <div class="radio-group">
+          <label><input type="radio" name="side" value="w" checked> White</label>
+          <label><input type="radio" name="side" value="b"> Black</label>
+        </div>
+      </div>
+      <div class="form-row">
+        <span>Starting position</span>
+        <div class="radio-group">
+          <label><input type="radio" name="start" value="startpos" checked onchange="toggleFen(false)"> Starting position</label>
+          <label><input type="radio" name="start" value="fen" onchange="toggleFen(true)"> FEN</label>
+        </div>
+        <input type="text" id="fen-input" placeholder="FEN string" style="display:none">
+      </div>
+      <div class="form-row">
+        <span>Moves</span>
+        <div class="radio-group">
+          <label><input type="radio" name="moves-fmt" value="pgn" checked onchange="setMovesFmt('pgn')"> PGN (paste game)</label>
+          <label><input type="radio" name="moves-fmt" value="uci" onchange="setMovesFmt('uci')"> UCI (manual)</label>
+        </div>
+        <textarea id="moves-input" placeholder="Paste PGN here — e.g. 1. e4 e5 2. Nf3 ..."></textarea>
+      </div>
+      <div class="error-msg"  id="error-msg"></div>
+      <div class="loading-msg" id="loading-msg">Analyzing… this may take a minute or two.</div>
+      <button class="btn" id="analyze-btn" onclick="submitAnalysis()">Analyze</button>
+    </div>
+  </div>
+
+  <script>
+    const FILES = ['a','b','c','d','e','f','g','h'];
+    const RANKS = ['1','2','3','4','5','6','7','8'];
+    const PIECE_BASE = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
+    const PIECE_FILE = {
+      'P':'wP','N':'wN','B':'wB','R':'wR','Q':'wQ','K':'wK',
+      'p':'bP','n':'bN','b':'bB','r':'bR','q':'bQ','k':'bK'
+    };
+    const pieceUrl = f => PIECE_BASE + PIECE_FILE[f] + '.svg';
+
+    let frames = [];
+    let cur = 0;
+    let engineSide = 'w';
+
+    // ── Coords ───────────────────────────────────────────────
+    function buildCoords() {
+      const flipped = engineSide === 'b';
+      const rl = document.getElementById('rank-labels');
+      const fl = document.getElementById('file-labels');
+      rl.innerHTML = fl.innerHTML = '';
+      const ranks = flipped ? ['1','2','3','4','5','6','7','8'] : ['8','7','6','5','4','3','2','1'];
+      const files = flipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
+      for (const r of ranks) { const d = document.createElement('div'); d.className = 'rank-label'; d.textContent = r; rl.appendChild(d); }
+      for (const f of files) { const d = document.createElement('div'); d.className = 'file-label'; d.textContent = f; fl.appendChild(d); }
+    }
+
+    // ── FEN helpers ──────────────────────────────────────────
+    function fenToMap(fen) {
+      const map = {};
+      const rows = fen.split(' ')[0].split('/');
+      for (let r = 7; r >= 0; r--) {
+        let f = 0;
+        for (const ch of rows[7 - r]) {
+          if (isNaN(ch)) { map[FILES[f] + RANKS[r]] = ch; f++; }
+          else f += +ch;
+        }
+      }
+      return map;
+    }
+    const fenSide     = fen => fen.split(' ')[1] || 'w';
+    const fenFullmove = fen => parseInt(fen.split(' ')[5]) || 1;
+
+    // ── Board ────────────────────────────────────────────────
+    function renderBoard() {
+      const frame = frames[cur];
+      const boardEl = document.getElementById('board');
+      boardEl.innerHTML = '';
+      if (!frame) return;
+
+      const flipped = engineSide === 'b';
+      const pieces = fenToMap(frame.fen);
+      let lastFrom = null, lastTo = null;
+      if (cur > 0 && frames[cur - 1]?.move_played) {
+        lastFrom = frames[cur - 1].move_played.slice(0, 2);
+        lastTo   = frames[cur - 1].move_played.slice(2, 4);
+      }
+
+      const rankOrder = flipped ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
+      const fileOrder = flipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+      for (const r of rankOrder) {
+        for (const f of fileOrder) {
+          const sq = FILES[f] + RANKS[r];
+          const div = document.createElement('div');
+          div.className = 'sq ' + ((f + r) % 2 !== 0 ? 'light' : 'dark');
+          if (sq === lastFrom) div.classList.add('last-from');
+          if (sq === lastTo)   div.classList.add('last-to');
+          const piece = pieces[sq];
+          if (piece) {
+            const img = document.createElement('img');
+            img.src = pieceUrl(piece);
+            img.draggable = false;
+            div.appendChild(img);
+          }
+          boardEl.appendChild(div);
+        }
+      }
+    }
+
+    // ── Analysis panel ───────────────────────────────────────
+    function evalFmt(cp) {
+      if (cp === null || cp === undefined) return null;
+      const v = (Math.abs(cp) / 100).toFixed(2);
+      return (cp >= 0 ? '+' : '-') + v;
+    }
+    function evalClass(cp) {
+      return cp > 0 ? 'pos' : cp < 0 ? 'neg' : '';
+    }
+    function ttRowHtml(label, e) {
+      if (!e) return `<tr><td>${label}</td><td colspan="5" class="dim">—</td></tr>`;
+      const sc = evalFmt(e.score) || '0.00';
+      const cls = evalClass(e.score);
+      return `<tr>
+        <td>${label}</td>
+        <td>${e.depth}</td>
+        <td class="${cls}">${sc}</td>
+        <td>${e.flag}</td>
+        <td class="move-badge" style="font-size:.74rem">${e.best_move || '—'}</td>
+        <td class="dim">${e.generation}</td>
+      </tr>`;
+    }
+
+    function renderInfo() {
+      const frame = frames[cur];
+      const panel = document.getElementById('analysis-panel');
+      if (!frame) { panel.innerHTML = '<div class="dim">No frame.</div>'; return; }
+
+      const hm   = frame.halfmove;
+      const fm   = Math.floor(hm / 2) + fenFullmove(frames[0].fen);
+      const side = fenSide(frame.fen);
+      const sideStr = side === 'w' ? 'White' : 'Black';
+      const role = frame.is_engine_move ? '⚙ Engine' : '⚔ Opponent';
+
+      let html = `<div class="panel-header">${sideStr} · Move ${fm} · ${role}</div>`;
+
+      if (frame.move_played) {
+        html += `<div class="panel-section">
+          <div class="panel-label">Move played</div>
+          <span class="move-badge">${frame.move_played}</span>
+        </div>`;
+      } else {
+        html += `<div class="dim" style="font-style:italic">Final position</div>`;
+      }
+
+      if (frame.is_engine_move) {
+        // Eval
+        if (frame.eval !== null) {
+          const es = evalFmt(frame.eval);
+          const cls = evalClass(frame.eval);
+          html += `<hr class="divider">
+          <div class="panel-section">
+            <div class="panel-label">Evaluation</div>
+            <span class="eval-num ${cls}">${es}</span>
+          </div>`;
+        }
+
+        // Engine's chosen move vs game
+        if (frame.best_move_found) {
+          const matches = frame.matches_game;
+          html += `<div class="panel-section">
+            <div class="panel-label">Engine chose</div>
+            <span class="move-badge">${frame.best_move_found}</span>
+            ${matches
+              ? `<span class="match-ok">✓ matches game</span>`
+              : `<span class="match-bad">✗ different from game!</span>`
+            }
+          </div>`;
+        }
+
+        // TT
+        html += `<hr class="divider">
+        <div class="panel-section">
+          <div class="panel-label">Transposition Table</div>
+          <table class="tt-table">
+            <tr><th></th><th>depth</th><th>score</th><th>flag</th><th>best</th><th>gen</th></tr>
+            ${ttRowHtml('before', frame.tt_before)}
+            ${ttRowHtml('after',  frame.tt_after)}
+          </table>
+          ${frame.tt_before ? `<div class="tt-warn">⚠ TT had cached entry entering search</div>` : ''}
+        </div>`;
+
+        // History
+        if (frame.history_top?.length) {
+          html += `<hr class="divider">
+          <div class="panel-section">
+            <div class="panel-label">History table (top moves after search)</div>
+            <table class="hist-table">
+              <tr><th>from</th><th>to</th><th>score</th></tr>
+              ${frame.history_top.map(h =>
+                `<tr><td>${h.from}</td><td>${h.to}</td><td>${h.score}</td></tr>`
+              ).join('')}
+            </table>
+          </div>`;
+        }
+      }
+
+      panel.innerHTML = html;
+    }
+
+    // ── Move list ─────────────────────────────────────────────
+    function renderMoveList() {
+      const el = document.getElementById('move-list');
+      el.innerHTML = '';
+      if (!frames.length) return;
+
+      const startSide = fenSide(frames[0].fen);
+      let fm = fenFullmove(frames[0].fen);
+      let i  = 0;
+
+      const addNum = t => {
+        const s = document.createElement('span');
+        s.className = 'mv-num'; s.textContent = t; el.appendChild(s);
+      };
+      const addMove = idx => {
+        const f = frames[idx];
+        if (!f?.move_played) return;
+        const isActive = idx === cur;
+        const isEngine = f.is_engine_move;
+        const s = document.createElement('span');
+        s.className = 'mv' + (isEngine ? ' engine' : '') + (isActive ? (isEngine ? ' active-engine' : ' active') : '');
+        s.textContent = f.move_played;
+        s.addEventListener('click', () => { cur = idx; render(); });
+        el.appendChild(s);
+      };
+
+      if (startSide === 'b') {
+        addNum(fm + '…'); addMove(i++); fm++;
+      }
+      while (i < frames.length - 1) {
+        addNum(fm + '.');
+        if (i < frames.length - 1) addMove(i++);
+        if (i < frames.length - 1) addMove(i++);
+        fm++;
+      }
+
+      el.querySelector('.active, .active-engine')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+
+    // ── Navigation ────────────────────────────────────────────
+    function navigate(delta) {
+      cur = Math.max(0, Math.min(frames.length - 1, cur + delta));
+      render();
+    }
+
+    function render() {
+      buildCoords();
+      renderBoard();
+      renderInfo();
+      renderMoveList();
+      document.getElementById('move-counter').textContent =
+        frames.length ? `${cur + 1} / ${frames.length}` : '';
+    }
+
+    // ── Input form ─────────────────────────────────────────────
+    function toggleFen(show) {
+      document.getElementById('fen-input').style.display = show ? 'block' : 'none';
+    }
+    function setMovesFmt(fmt) {
+      const ta = document.getElementById('moves-input');
+      ta.placeholder = fmt === 'pgn'
+        ? 'Paste PGN here — e.g. 1. e4 e5 2. Nf3 Nc6 …'
+        : 'Space-separated UCI moves — e.g. e2e4 e7e5 g1f3 …';
+    }
+    function showInput() {
+      document.getElementById('input-overlay').classList.add('show');
+    }
+
+    function pgnToUci(pgn, startFen) {
+      const game = startFen ? new Chess(startFen) : new Chess();
+      if (!game.load_pgn(pgn)) throw new Error('Invalid PGN');
+      return game.history({ verbose: true }).map(m => m.from + m.to + (m.promotion || ''));
+    }
+
+    async function submitAnalysis() {
+      const side    = document.querySelector('input[name=side]:checked').value;
+      const usesFen = document.querySelector('input[name=start]:checked').value === 'fen';
+      const fenVal  = document.getElementById('fen-input').value.trim();
+      const raw     = document.getElementById('moves-input').value.trim();
+      const isPgn   = document.querySelector('input[name=moves-fmt]:checked').value === 'pgn';
+
+      const errEl  = document.getElementById('error-msg');
+      const loadEl = document.getElementById('loading-msg');
+      const btn    = document.getElementById('analyze-btn');
+      errEl.style.display = 'none';
+
+      if (usesFen && !fenVal) { errEl.textContent = 'FEN is empty.'; errEl.style.display = 'block'; return; }
+
+      let moves;
+      try {
+        if (isPgn) {
+          moves = pgnToUci(raw, usesFen ? fenVal : null);
+        } else {
+          moves = raw.split(/[\s\n]+/).filter(m => m.length >= 4);
+        }
+      } catch (e) {
+        errEl.textContent = 'Could not parse moves: ' + e.message;
+        errEl.style.display = 'block';
+        return;
+      }
+
+      loadEl.style.display = 'block';
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ engine_side: side, start_fen: usesFen ? fenVal : null, moves }),
+        });
+        if (!res.ok) {
+          const msg = await res.text();
+          throw new Error(msg || `Server returned ${res.status}`);
+        }
+        frames = await res.json();
+        engineSide = side;
+        cur = 0;
+        document.getElementById('input-overlay').classList.remove('show');
+        document.getElementById('main-view').style.display = 'flex';
+        render();
+      } catch (e) {
+        errEl.textContent = 'Analysis failed: ' + e.message;
+        errEl.style.display = 'block';
+      } finally {
+        loadEl.style.display = 'none';
+        btn.disabled = false;
+      }
+    }
+
+    document.addEventListener('keydown', e => {
+      if (document.getElementById('input-overlay').classList.contains('show')) return;
+      if (e.key === 'ArrowLeft')  navigate(-1);
+      if (e.key === 'ArrowRight') navigate(1);
+    });
+  </script>
+</body>
+</html>
