@@ -4,7 +4,7 @@ Contains `make_move` which updates the board state to match the given move
 
 use std::f64::consts::PI;
 
-use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE, PST}, movegen::{attacks::all_attacks, r#move::{Flag, Move}}};
+use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE, PST}, movegen::{attacks::{all_attacks, is_in_check}, r#move::{Flag, Move}}};
 
 /// Performs the given move on the board by updating its state
 pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
@@ -206,7 +206,7 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
 }
 
 /// Restores the board state to the state before the last move
-pub fn unmake_move(board: &mut Board, mv: Move, unmake: UnmakeInfo) {
+pub fn unmake_move(board: &mut Board, mv: Move, unmake: &UnmakeInfo) {
     let source_bb = 1 << mv.source_square() as u8;
     let target_bb = 1 << mv.target_square() as u8;
     let piece = unmake.moved;
@@ -286,8 +286,32 @@ pub fn unmake_move(board: &mut Board, mv: Move, unmake: UnmakeInfo) {
     unmake.write(board);
 }
 
+/// Makes a null move on the given board
+pub fn make_null_move(board: &mut Board) -> UnmakeInfo {
+    let unmake = UnmakeInfo::read(board);
+    if board.side == Side::Black {
+        board.fullmoves += 1;
+    }
+    board.halfmoves += 1;
+    board.side = board.side.other();
+    board.hash ^= SIDE_HASH[Side::White as usize] ^ SIDE_HASH[Side::Black as usize];
+    if let Some(square) = board.enpassant {
+        let (_, file) = square.to_rank_file();
+        board.hash ^= ENPASSANT_HASH[file as usize];
+        board.enpassant = None;
+    }
+    board.repetitions = board.history.add(board.hash, Move::new(Flag::QUIET, Square::a2, Square::a2), Piece::WhiteKing);
+    unmake
+}
+
+/// Unmakes a null move on the given board
+pub fn unmake_null_move(board: &mut Board, unmake: &UnmakeInfo) {
+    board.side = board.side.other();
+    unmake.write(board);
+}
+
 /// Struct containing information required for unmake move
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct UnmakeInfo {
     pub(crate) castling: u8,
     pub(crate) enpassant: Option<Square>,
@@ -314,12 +338,12 @@ impl UnmakeInfo {
             hash: board.hash,
             start_idx: board.history.start_idx,
             score: board.score,
-            repetitions: board.repetitions
+            repetitions: board.repetitions,
         }
     }
 
     /// Writes all but `captured` into the board
-    pub fn write(self, board: &mut Board) {
+    pub fn write(&self, board: &mut Board) {
         board.castling = self.castling;
         board.enpassant = self.enpassant;
         board.halfmoves = self.halfmoves;

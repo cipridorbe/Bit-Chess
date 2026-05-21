@@ -1,5 +1,8 @@
+mod pawn;
+mod king;
+
 use once_cell::sync::Lazy;
-use crate::{bitboard::{Board, Piece, Side}, util::squares};
+use crate::{bitboard::{Board, Piece, Side}, eval::{king::king_bonus, pawn::pawn_bonus}, util::squares};
 
 pub const PIECE_VALUE: [i16; 12] = [
     0100, 0300, 0300, 0500, 0900, 000,
@@ -107,7 +110,7 @@ pub fn eval(board: &Board) -> i16 {
 /// Evaluates the given position with respect to the current player. If the
 /// current player is winning it is positive, otherwise negative
 pub fn relative_eval(board: &Board) -> i16 {
-    let eval = board.score;
+    let eval = board.score + pawn_bonus(board) + king_bonus(board);
     match board.side {
         Side::White => eval,
         Side::Black => -eval

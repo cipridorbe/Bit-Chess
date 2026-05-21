@@ -13,7 +13,7 @@ pub fn perft(board: &Board, depth: u32) -> u64 {
         if !is_in_check_after_move(&board) {
             out += perft(&board, depth - 1);
         }
-        unmake_move(&mut board, mv, unmake);
+        unmake_move(&mut board, mv, &unmake);
     }
     out
 }

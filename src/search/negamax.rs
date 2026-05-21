@@ -4,49 +4,67 @@ Implementation of negamax, used as the main search algorithm.
 
 use serde::de;
 
-use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{is_in_check_after_move, make_move, unmake_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
+use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{is_in_check_after_move, make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
 const MATE_CUTOFF: i16 = 29000;
 pub const INF: i16 = 31000;
+const DELTA_SEARCH: i16 = 50;
 
 pub static mut NODE_COUNT: u64 = 0;
 
 pub fn search(board: &mut Board, max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64]) -> Option<Move> {
     let mut state = SearchState::new_search(tt, history);
     let mut best_move = None;
+    let mut iteration_score = 0;
     for depth in 1..=max_depth {
         let tt_best = state.tt.find(board.hash).and_then(|e| e.best_move);
-        let mut best_score = -INF;
-        let mut alpha = -INF;
-
         let mut movelist = generate_movelist(&board, false);
         movelist.sort(&board, tt_best, &state.killers[0], state.history);
-        for mv in movelist.iter() {
-            let unmake = make_move(board, mv);
-            if is_in_check_after_move(&board) {
-                unmake_move(board, mv, unmake);
-                continue;
+
+        let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - DELTA_SEARCH };
+        let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + DELTA_SEARCH };
+
+        loop {
+            let mut best_score = -INF;
+            let mut alpha = aspiration_alpha;
+
+            for mv in movelist.iter() {
+                let unmake = make_move(board, mv);
+                if is_in_check_after_move(&board) {
+                    unmake_move(board, mv, &unmake);
+                    continue;
+                }
+                let score = if board.is_rule_draw() {
+                    0
+                } else {
+                    -negamax(board, -aspiration_beta, -alpha, depth, 0, false, &mut state)
+                };
+                unmake_move(board, mv, &unmake);
+                if score > best_score {
+                    best_score = score;
+                    best_move = Some(mv);
+                    alpha = score;
+                }
+                if alpha >= aspiration_beta {
+                    break;
+                }
             }
-            let score = if board.is_rule_draw() {
-                0
+            if best_score <= aspiration_alpha {
+                aspiration_alpha = -INF;
+            } else if best_score >= aspiration_beta {
+                aspiration_beta = INF;
             } else {
-                -negamax(board, -INF, -alpha, depth, 0, &mut state)
-            };
-            unmake_move(board, mv, unmake);
-            if score > best_score {
-                best_score = score;
-                best_move = Some(mv);
-                alpha = score;
+                state.tt.insert(TTEntry::new(board.hash, depth, best_score, TTFlag::Exact, best_move, board.fullmoves, state.tt.generation));
+                iteration_score = best_score;
+                break;
             }
         }
-
-        state.tt.insert(TTEntry::new(board.hash, depth, best_score, TTFlag::Exact, best_move, board.fullmoves, state.tt.generation));
     }
     best_move
 }
 
-pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, state: &mut SearchState) -> i16 {
+pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, state: &mut SearchState) -> i16 {
     unsafe { NODE_COUNT += 1; }
     let mut predicted_best_move = None;
     if let Some(entry) = state.tt.find(board.hash) {
@@ -72,25 +90,42 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         return quiescence(board, alpha, beta);
     }
 
+    if  allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check() {
+        let unmake = make_null_move(board);
+        let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, state);
+        unmake_null_move(board, &unmake);
+        if null_move_score >= beta {
+            state.tt.insert(TTEntry::new(board.hash, depth, null_move_score, TTFlag::Lower, None, board.fullmoves, state.tt.generation));
+            return null_move_score;
+        }
+    }
+
     let mut movelist = generate_movelist(board, false);
     movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history);
     let mut value = -INF;
     let mut moved = false;
     let original_alpha = alpha;
     let mut best_move = None;
-    for mv in movelist.iter() {
+    for (i, mv) in movelist.iter().enumerate() {
         let unmake = make_move(board, mv);
         if is_in_check_after_move(board) {
-            unmake_move(board, mv, unmake);
+            unmake_move(board, mv, &unmake);
             continue;
         }
         moved = true;
         let score = if board.is_rule_draw() {
             0
+        } else if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check() {
+            let low_score = -negamax(board, -alpha-1, -alpha, depth - 2, ply + 1, true, state);
+            if low_score > alpha {
+                -negamax(board, -beta, -alpha, depth - 1, ply + 1, true, state)
+            } else {
+                low_score
+            }
         } else {
-            -negamax(board, -beta, -alpha, depth - 1, ply + 1, state)
+            -negamax(board, -beta, -alpha, depth - 1, ply + 1, true, state)
         };
-        unmake_move(board, mv, unmake);
+        unmake_move(board, mv, &unmake);
         if score > value {
             best_move = Some(mv);
             value = score;
@@ -146,7 +181,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
     for mv in movelist.iter() {
         let unmake = make_move(board, mv);
         if is_in_check_after_move(board) {
-            unmake_move(board, mv, unmake);
+            unmake_move(board, mv, &unmake);
             continue;
         }
         moved = true;
@@ -155,7 +190,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
         } else {
             -quiescence(board, -beta, -alpha)
         };
-        unmake_move(board, mv, unmake);
+        unmake_move(board, mv, &unmake);
         value = i16::max(value, score);
         alpha = i16::max(alpha, value);
         if alpha >= beta {
