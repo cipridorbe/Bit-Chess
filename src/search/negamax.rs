@@ -4,7 +4,7 @@ Implementation of negamax, used as the main search algorithm.
 
 use serde::de;
 
-use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{is_in_check_after_move, make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
+use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
 const MATE_CUTOFF: i16 = 29000;
@@ -18,6 +18,7 @@ pub fn search(board: &mut Board, max_depth: u8, tt: &mut TT, history: &mut [[i16
     let mut best_move = None;
     let mut iteration_score = 0;
     for depth in 1..=max_depth {
+        state.max_depth = depth;
         let tt_best = state.tt.find(board.hash).and_then(|e| e.best_move);
         let mut movelist = generate_movelist(&board, false);
         movelist.sort(&board, tt_best, &state.killers[0], state.history);
@@ -31,7 +32,7 @@ pub fn search(board: &mut Board, max_depth: u8, tt: &mut TT, history: &mut [[i16
 
             for mv in movelist.iter() {
                 let unmake = make_move(board, mv);
-                if is_in_check_after_move(&board) {
+                if board.in_check(board.side.other()) {
                     unmake_move(board, mv, &unmake);
                     continue;
                 }
@@ -90,7 +91,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         return quiescence(board, alpha, beta);
     }
 
-    if  allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check() {
+    if  allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
         let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, state);
         unmake_null_move(board, &unmake);
@@ -108,14 +109,14 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     let mut best_move = None;
     for (i, mv) in movelist.iter().enumerate() {
         let unmake = make_move(board, mv);
-        if is_in_check_after_move(board) {
+        if board.in_check(board.side.other()) {
             unmake_move(board, mv, &unmake);
             continue;
         }
         moved = true;
         let score = if board.is_rule_draw() {
             0
-        } else if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check() {
+        } else if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
             let low_score = -negamax(board, -alpha-1, -alpha, depth - 2, ply + 1, true, state);
             if low_score > alpha {
                 -negamax(board, -beta, -alpha, depth - 1, ply + 1, true, state)
@@ -123,7 +124,8 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
                 low_score
             }
         } else {
-            -negamax(board, -beta, -alpha, depth - 1, ply + 1, true, state)
+            let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
+            -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
         };
         unmake_move(board, mv, &unmake);
         if score > value {
@@ -138,8 +140,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     }
 
     if !moved {
-        let attacks = all_attacks(board, board.side.other());
-        if is_in_check(attacks, board.pieces[Piece::king(board.side) as usize]) {
+        if board.in_check(board.side) {
             return -(MATE_VAL - board.fullmoves as i16);
         } else {
             return 0;
@@ -161,8 +162,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
 
 fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
     unsafe { NODE_COUNT += 1; }
-    let attacks = all_attacks(board, board.side.other());
-    let in_check = is_in_check(attacks, board.pieces[Piece::king(board.side) as usize]);
+    let in_check = board.in_check(board.side);
     let stand_pat = if !in_check {
         let eval = relative_eval(board);
         if eval >= beta {
@@ -180,7 +180,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
     movelist.sort_mvvlva(board, None);
     for mv in movelist.iter() {
         let unmake = make_move(board, mv);
-        if is_in_check_after_move(board) {
+        if board.in_check(board.side.other()) {
             unmake_move(board, mv, &unmake);
             continue;
         }

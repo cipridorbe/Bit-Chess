@@ -5,7 +5,8 @@ use crate::{movegen::r#move::Move, search::{negamax::INF, tt::TT}};
 pub struct SearchState<'a> {
     pub(crate) killers: [[Option<Move>; 2]; 32],
     pub(crate) tt: &'a mut TT,
-    pub(crate) history: &'a mut [[i16; 64]; 64]
+    pub(crate) history: &'a mut [[i16; 64]; 64],
+    pub(crate) max_depth: u8
 }
 
 
@@ -21,7 +22,8 @@ impl<'a> SearchState<'a> {
         SearchState {
             killers: [[None; 2]; 32],
             tt: tt,
-            history: history
+            history: history,
+            max_depth: 20
         }
     }
 

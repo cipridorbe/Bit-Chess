@@ -306,6 +306,12 @@ pub struct Board {
 
     /// The number of times the current move appears in the search history
     pub(crate) repetitions: u8,
+
+    /// Whether white is in check
+    pub(crate) white_in_check: bool,
+
+    /// Whether black is in check
+    pub(crate) black_in_check: bool,
 }
 
 impl Board {
@@ -380,10 +386,12 @@ impl Board {
         out
     }
 
-    // Returns true if the king of the current side is in check
-    pub fn in_check(&self) -> bool {
-        let attacks = all_attacks(&self, self.side.other());
-        attacks & self.pieces[Piece::king(self.side) as usize] != 0
+    // Returns true if the king of the given side is in check
+    pub fn in_check(&self, side: Side) -> bool {
+        match side {
+            Side::White => self.white_in_check,
+            Side::Black => self.black_in_check
+        }
     }
 
     fn format_board(&self, piece_fn: impl Fn(Piece) -> String, empty: char) -> String {
@@ -542,8 +550,12 @@ impl Board {
         let mut history = HashHistory::new();
         history.hashes.push(hash);
 
-        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1};
+        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1, white_in_check: false, black_in_check: false };
         b.score = eval(&b);
+        let white_attacks = all_attacks(&b, Side::White);
+        let black_attacks = all_attacks(&b, Side::Black);
+        b.white_in_check = black_attacks & b.pieces[Piece::WhiteKing as usize] != 0; 
+        b.black_in_check = white_attacks & b.pieces[Piece::BlackKing as usize] != 0; 
         b
     }
 

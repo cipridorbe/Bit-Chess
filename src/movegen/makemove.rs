@@ -202,6 +202,11 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
 
     board.repetitions = board.history.add(board.hash, mv, piece);
 
+    let white_attacks = all_attacks(board, Side::White);
+    let black_attacks = all_attacks(board, Side::Black);
+    board.white_in_check = black_attacks & board.pieces[Piece::WhiteKing as usize] != 0; 
+    board.black_in_check = white_attacks & board.pieces[Piece::BlackKing as usize] != 0; 
+
     unmake
 }
 
@@ -301,6 +306,8 @@ pub fn make_null_move(board: &mut Board) -> UnmakeInfo {
         board.enpassant = None;
     }
     board.repetitions = board.history.add(board.hash, Move::new(Flag::QUIET, Square::a2, Square::a2), Piece::WhiteKing);
+    board.white_in_check = false;
+    board.black_in_check = false;
     unmake
 }
 
@@ -323,6 +330,8 @@ pub struct UnmakeInfo {
     pub(crate) start_idx: usize,
     pub(crate) score: i16,
     pub(crate) repetitions: u8,
+    pub(crate) white_in_check: bool,
+    pub(crate) black_in_check: bool,
 }
 
 impl UnmakeInfo {
@@ -339,6 +348,8 @@ impl UnmakeInfo {
             start_idx: board.history.start_idx,
             score: board.score,
             repetitions: board.repetitions,
+            white_in_check: board.white_in_check,
+            black_in_check: board.black_in_check
         }
     }
 
@@ -353,15 +364,17 @@ impl UnmakeInfo {
         board.history.pop();
         board.score = self.score;
         board.repetitions = self.repetitions;
+        board.white_in_check = self.white_in_check;
+        board.black_in_check = self.black_in_check;
     }
 }
 
 /// Returns true if the side that just moved left their king in check.
-pub fn is_in_check_after_move(board: &Board) -> bool {
-    let side = board.side.other();
-    let king_bb = board.pieces[Piece::king(side) as usize];
-    all_attacks(board, board.side) & king_bb != 0
-}
+// pub fn is_in_check_after_move(board: &Board) -> bool {
+//     let side = board.side.other();
+//     let king_bb = board.pieces[Piece::king(side) as usize];
+//     all_attacks(board, board.side) & king_bb != 0
+// }
 
 #[cfg(test)]
 mod tests {

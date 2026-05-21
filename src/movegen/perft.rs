@@ -2,7 +2,7 @@
 Counts the number of moves at any given position. Used for testing purposes.
 */
 
-use crate::{bitboard::Board, movegen::{generator::generate_movelist, makemove::{is_in_check_after_move, make_move, unmake_move}}};
+use crate::{bitboard::Board, movegen::{generator::generate_movelist, makemove::{make_move, unmake_move}}};
 
 pub fn perft(board: &Board, depth: u32) -> u64 {
     let mut board= board.clone();
@@ -10,7 +10,7 @@ pub fn perft(board: &Board, depth: u32) -> u64 {
     let mut out = 0;
     for mv in generate_movelist(&board, false).iter() {
         let unmake = make_move(&mut board, mv);
-        if !is_in_check_after_move(&board) {
+        if !board.in_check(board.side.other()) {
             out += perft(&board, depth - 1);
         }
         unmake_move(&mut board, mv, &unmake);
@@ -27,12 +27,12 @@ mod tests {
     // Perft divide: prints per-move counts, useful for pinpointing discrepancies
     #[allow(dead_code)]
     fn perft_divide(board: &Board, depth: u32) {
-        use crate::movegen::{generator::generate_movelist, makemove::{make_move, is_in_check_after_move}};
+        use crate::movegen::{generator::generate_movelist, makemove::{make_move}};
         let mut total = 0u64;
         for mv in generate_movelist(board, false).iter() {
             let mut copy = board.clone();
             make_move(&mut copy, mv);
-            if !is_in_check_after_move(&copy) {
+            if !copy.in_check(copy.side.other()) {
                 let count = perft(&copy, depth - 1);
                 println!("{}: {}", mv.to_uci(), count);
                 total += count;

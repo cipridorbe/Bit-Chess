@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+cd "$(dirname "$0")/.." || exit 1
 # ── Paths ─────────────────────────────────────────────────────────────────────
 CUTECHESS="/c/Program Files (x86)/Cute Chess/cutechess-cli.exe"
 BITCHESS="./target/release/uci.exe"
