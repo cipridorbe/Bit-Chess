@@ -1,4 +1,4 @@
-use crate::{bitboard::{Board, Piece, Side}, movegen::tables::PAWN_ATTACKS, util::populate_files};
+use crate::{bitboard::{Board, Piece, Side}, util::populate_files};
 
 const MISSING_BONUS: i16 = -20;
 // indexed by 2-bit file status: bit1=own pawn exists, bit0=enemy pawn exists
@@ -26,6 +26,12 @@ pub fn king_files(king: u64, my_pawns: u64, enemy_pawns: u64) -> (u8, u8, u8) {
     let left_out = ((((left_file & my_pawns) != 0) as u8) << 1) | (((left_file & enemy_pawns) != 0) as u8);
     let right_out = ((((right_file & my_pawns) != 0) as u8) << 1) | (((right_file & enemy_pawns) != 0) as u8);
     (left_out, king_out, right_out)
+}
+
+/// closed file = 2/3 (10/11), semi-open file = 1 (01), open file = 0 (00)
+pub fn file_status(mut file: u64, my_pawns: u64, enemy_pawns: u64) -> u8 {
+    file = populate_files(file);
+    ((file & my_pawns != 0) as u8) << 1 | (file & enemy_pawns != 0) as u8
 }
 
 pub fn king_bonus(board: &Board) -> i16 {

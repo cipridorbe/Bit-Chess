@@ -2,9 +2,7 @@
 Implementation of negamax, used as the main search algorithm.
 */
 
-use serde::de;
-
-use crate::{bitboard::{Board, Piece}, eval::relative_eval, movegen::{attacks::{all_attacks, is_in_check}, generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
+use crate::{bitboard::{Board}, eval::relative_eval, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
 const MATE_CUTOFF: i16 = 29000;

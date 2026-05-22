@@ -6,7 +6,7 @@
 use once_cell::sync::Lazy;
 use rand::{Rng, RngCore};
 
-use crate::{bitboard::{self, Board, Side, Square}, util::all_squares};
+use crate::{bitboard::{Board, Side, Square}, util::all_squares};
 // =============================================================================
 //                              LEAPER PIECES
 // =============================================================================
@@ -471,6 +471,7 @@ fn try_create_bishop_magic_table(square: Square, magic: u64) -> Option<Vec<u64>>
 
 /// Finds a set of working magic numbers for the rook, or panics if it fails.
 /// Only used to precompute the magic numbers used in the tables above.
+#[allow(dead_code)]
 fn compute_rook_magics() -> [u64; 64] {
     let mut rng = rand::rng();
     let mut magics_table = [0; 64];
@@ -492,6 +493,7 @@ fn compute_rook_magics() -> [u64; 64] {
 
 /// Finds a set of working magic numbers for the bishop, or panics if it fails.
 /// Only used to precompute the magic numbers used in the tables above.
+#[allow(dead_code)]
 fn compute_bishop_magics() -> [u64; 64] {
     let mut rng = rand::rng();
     let mut magics_table = [0; 64];

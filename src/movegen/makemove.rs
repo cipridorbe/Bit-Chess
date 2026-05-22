@@ -2,9 +2,7 @@
 Contains `make_move` which updates the board state to match the given move
 */
 
-use std::f64::consts::PI;
-
-use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}, movegen::{attacks::{all_attacks, is_in_check}, r#move::{Flag, Move}}};
+use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}, movegen::{attacks::{king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move}}, util::lsb_index};
 
 /// Performs the given move on the board by updating its state
 pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
@@ -15,6 +13,9 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
 
     let mut unmake = UnmakeInfo::read(board);
     unmake.moved = piece;
+
+    let mut other_in_check_after = false;
+    let mut self_in_check_after = false;
 
     let captured = board.mailbox[mv.target_square() as usize];
 
@@ -57,6 +58,18 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
         board.mg_score -= PST_MG[piece as usize][mv.target_square() as usize] + PIECE_VALUE_MG[piece as usize];
         board.eg_score -= PST_EG[piece as usize][mv.target_square() as usize] + PIECE_VALUE_EG[piece as usize];
         board.hash ^= POSITION_PIECE_HASH[piece as usize][mv.target_square() as usize];
+    } else {
+        let other_king = board.pieces[Piece::king(side.other()) as usize];
+        other_in_check_after = match piece {
+            Piece::WhitePawn | Piece::BlackPawn => pawn_attacks(board.pieces[Piece::pawn(side) as usize], side) & other_king != 0,
+            Piece::WhiteKnight | Piece::BlackKnight => knight_attacks(board.pieces[Piece::knight(side) as usize]) & other_king != 0,
+            Piece::WhiteKing | Piece::BlackKing => {
+                let king_attacks = king_attacks(board.pieces[Piece::king(side) as usize]);
+                self_in_check_after = king_attacks & other_king != 0;
+                king_attacks & other_king != 0
+            },
+            _ => false
+        }
     }
 
     match mv.flag() {
@@ -134,6 +147,7 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
             board.mg_score += PIECE_VALUE_MG[Piece::knight(side) as usize] + PST_MG[Piece::knight(side) as usize][mv.target_square() as usize];
             board.eg_score += PIECE_VALUE_EG[Piece::knight(side) as usize] + PST_EG[Piece::knight(side) as usize][mv.target_square() as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::knight(side) as usize][mv.target_square() as usize];
+            other_in_check_after = knight_attacks(board.pieces[Piece::knight(side) as usize]) & board.pieces[Piece::king(side.other()) as usize] != 0
         },
         Flag::BISHOPPROM | Flag::BISHOPPROMCAP => {
             board.pieces[Piece::bishop(side) as usize] |= target_bb;
@@ -214,12 +228,45 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
 
     board.repetitions = board.history.add(board.hash, mv, piece);
 
-    let white_attacks = all_attacks(board, Side::White);
-    let black_attacks = all_attacks(board, Side::Black);
-    board.white_in_check = black_attacks & board.pieces[Piece::WhiteKing as usize] != 0; 
-    board.black_in_check = white_attacks & board.pieces[Piece::BlackKing as usize] != 0; 
+    other_in_check_after = other_in_check_after || in_slider_attacked(board, board.pieces[Piece::king(side.other()) as usize], side.other());
+    let in_check_before = board.in_check(side);
+    if !self_in_check_after {
+        if in_check_before || piece == Piece::WhiteKing || piece == Piece::BlackKing {
+            self_in_check_after = square_attacked(board, board.pieces[Piece::king(side) as usize], side);
+        } else {
+            self_in_check_after = in_slider_attacked(board, board.pieces[Piece::king(side) as usize], side);
+        }
+    }
+
+    if side == Side::White {
+        board.white_in_check = self_in_check_after;
+        board.black_in_check = other_in_check_after;
+    } else {
+        board.white_in_check = other_in_check_after;
+        board.black_in_check = self_in_check_after;
+    }
+
+    // let white_attacks = all_attacks(board, Side::White);
+    // let black_attacks = all_attacks(board, Side::Black);
+    // board.white_in_check = black_attacks & board.pieces[Piece::WhiteKing as usize] != 0; 
+    // board.black_in_check = white_attacks & board.pieces[Piece::BlackKing as usize] != 0; 
 
     unmake
+}
+
+// checks if the bb square of the given side is being checked by a slider of the other side
+fn in_slider_attacked(board: &Board, bb: u64, side: Side) -> bool {
+    let square = unsafe { std::mem::transmute(lsb_index(bb)) };
+    single_bishop_attacks(square, board.occupied) & (board.pieces[Piece::bishop(side.other()) as usize] | board.pieces[Piece::queen(side.other()) as usize]) != 0
+    || single_rook_attacks(square, board.occupied) & (board.pieces[Piece::rook(side.other()) as usize] | board.pieces[Piece::queen(side.other()) as usize]) != 0
+}
+
+// bb should only have 1 set bit
+fn square_attacked(board: &Board, bb: u64, side: Side) -> bool {
+    pawn_attacks(bb, side) & board.pieces[Piece::pawn(side.other()) as usize] != 0
+    || knight_attacks(bb) & board.pieces[Piece::knight(side.other()) as usize] != 0
+    || in_slider_attacked(board, bb, side)
+    || king_attacks(bb) & board.pieces[Piece::king(side.other()) as usize] != 0
 }
 
 /// Restores the board state to the state before the last move

@@ -1,6 +1,4 @@
-use serde::de;
-
-use crate::{movegen::r#move::Move, search::{negamax::INF, tt::TT}};
+use crate::{movegen::r#move::Move, search::{tt::TT}};
 
 pub struct SearchState<'a> {
     pub(crate) killers: [[Option<Move>; 2]; 32],
