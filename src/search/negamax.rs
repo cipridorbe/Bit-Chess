@@ -13,6 +13,22 @@ const DELTA_SEARCH: i16 = 50;
 
 pub static mut NODE_COUNT: u64 = 0;
 
+pub fn store_score(score: i16, plies: u8) -> i16 {
+    if score.abs() > MATE_CUTOFF {
+        score.signum() * (score.abs() + plies as i16)
+    } else {
+        score
+    }
+}
+
+pub fn retrieve_score(score: i16, plies: u8) -> i16 {
+    if score.abs() > MATE_CUTOFF {
+        score.signum() * (score.abs() - plies as i16)
+    } else {
+        score
+    }
+}
+
 pub fn search(board: &mut Board, max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64]) -> Option<Move> {
     let mut state = SearchState::new_search(tt, history);
     let mut best_move = None;
@@ -71,24 +87,18 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     if let Some(entry) = state.tt.find(board.hash) {
         predicted_best_move = entry.best_move;
         if entry.depth >= depth && board.repetitions <= 1 {
+            let retrieved_score = retrieve_score(entry.score, ply);
             match entry.flag {
-                TTFlag::Exact => {
-                    if entry.score.abs() > MATE_CUTOFF {
-                        let delta = board.fullmoves as i16 - entry.full_moves as i16;
-                        return entry.score - entry.score.signum() * delta;
-                    } else {
-                        return entry.score;
-                    }
-                },
-                TTFlag::Lower => alpha = i16::max(alpha, entry.score),
-                TTFlag::Upper => beta = i16::min(beta, entry.score)
+                TTFlag::Exact => return retrieved_score,
+                TTFlag::Lower => alpha = i16::max(alpha, retrieved_score),
+                TTFlag::Upper => beta = i16::min(beta, retrieved_score)
             }
-            if alpha >= beta { return entry.score; }
+            if alpha >= beta { return retrieved_score; }
         }
     }
     
     if depth == 0 {
-        return quiescence(board, alpha, beta);
+        return quiescence(board, alpha, beta, ply);
     }
 
     if  allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
@@ -96,7 +106,8 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, state);
         unmake_null_move(board, &unmake);
         if null_move_score >= beta {
-            state.tt.insert(TTEntry::new(board.hash, depth, null_move_score, TTFlag::Lower, None, board.fullmoves, state.tt.generation));
+            let insert_score = store_score(null_move_score, ply);
+            state.tt.insert(TTEntry::new(board.hash, depth, insert_score, TTFlag::Lower, None, board.fullmoves, state.tt.generation));
             return null_move_score;
         }
     }
@@ -141,7 +152,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
 
     if !moved {
         if board.in_check(board.side) {
-            return -(MATE_VAL - board.fullmoves as i16);
+            return -(MATE_VAL - ply as i16);
         } else {
             return 0;
         }
@@ -155,12 +166,13 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         TTFlag::Upper
     };
     if board.repetitions <= 1 {
-        state.tt.insert(TTEntry::new(board.hash, depth, value, flag, best_move, board.fullmoves, state.tt.generation));
+        let store_score = store_score(value, ply);
+        state.tt.insert(TTEntry::new(board.hash, depth, store_score, flag, best_move, board.fullmoves, state.tt.generation));
     }
     value
 }
 
-fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
+fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
     unsafe { NODE_COUNT += 1; }
     let in_check = board.in_check(board.side);
     let stand_pat = if !in_check {
@@ -188,7 +200,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
         let score = if board.is_rule_draw() {
             0
         } else {
-            -quiescence(board, -beta, -alpha)
+            -quiescence(board, -beta, -alpha, ply+1)
         };
         unmake_move(board, mv, &unmake);
         value = i16::max(value, score);
@@ -198,7 +210,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16) -> i16 {
         }
     }
     if !moved && in_check {
-        return -(MATE_VAL - board.fullmoves as i16)
+        return -(MATE_VAL - ply as i16)
     }
     value
 }

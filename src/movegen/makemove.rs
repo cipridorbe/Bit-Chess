@@ -4,7 +4,7 @@ Contains `make_move` which updates the board state to match the given move
 
 use std::f64::consts::PI;
 
-use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE, PST}, movegen::{attacks::{all_attacks, is_in_check}, r#move::{Flag, Move}}};
+use crate::{bitboard::{Board, CASTLING_HASH, ENPASSANT_HASH, POSITION_PIECE_HASH, Piece, SIDE_HASH, Side, Square}, eval::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}, movegen::{attacks::{all_attacks, is_in_check}, r#move::{Flag, Move}}};
 
 /// Performs the given move on the board by updating its state
 pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
@@ -22,7 +22,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
     board.pieces[piece as usize] |= target_bb;
     board.mailbox[mv.source_square() as usize] = None;
     board.mailbox[mv.target_square() as usize] = Some(piece);
-    board.score += PST[piece as usize][mv.target_square() as usize] - PST[piece as usize][mv.source_square() as usize];
+    board.mg_score += PST_MG[piece as usize][mv.target_square() as usize] - PST_MG[piece as usize][mv.source_square() as usize];
+    board.eg_score += PST_EG[piece as usize][mv.target_square() as usize] - PST_EG[piece as usize][mv.source_square() as usize];
 
     board.hash ^= POSITION_PIECE_HASH[piece as usize][mv.source_square() as usize];
     board.hash ^= POSITION_PIECE_HASH[piece as usize][mv.target_square() as usize];
@@ -38,7 +39,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
         // Remove captured piece
         unmake.captured = Some(cap);
         board.pieces[cap as usize] &= !target_bb;
-        board.score -= PIECE_VALUE[cap as usize] + PST[cap as usize][mv.target_square() as usize];
+        board.mg_score -= PIECE_VALUE_MG[cap as usize] + PST_MG[cap as usize][mv.target_square() as usize];
+        board.eg_score -= PIECE_VALUE_EG[cap as usize] + PST_EG[cap as usize][mv.target_square() as usize];
         board.hash ^= POSITION_PIECE_HASH[cap as usize][mv.target_square() as usize];
         match mv.target_square() {
             Square::h1 => board.castling &= !Board::WHITE_KING_CASTLE,
@@ -52,7 +54,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
     if mv.is_promotion() {
         // Unset pawn at last row
         board.pieces[piece as usize] &= !(target_bb);
-        board.score -= PST[piece as usize][mv.target_square() as usize] + PIECE_VALUE[piece as usize];
+        board.mg_score -= PST_MG[piece as usize][mv.target_square() as usize] + PIECE_VALUE_MG[piece as usize];
+        board.eg_score -= PST_EG[piece as usize][mv.target_square() as usize] + PIECE_VALUE_EG[piece as usize];
         board.hash ^= POSITION_PIECE_HASH[piece as usize][mv.target_square() as usize];
     }
 
@@ -68,7 +71,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
             };
             board.pieces[Piece::pawn(side.other()) as usize] &= !(1 << pawn_square);
             board.mailbox[pawn_square as usize] = None;
-            board.score -= PST[Piece::pawn(side.other()) as usize][pawn_square as usize] + PIECE_VALUE[Piece::pawn(side.other()) as usize];
+            board.mg_score -= PST_MG[Piece::pawn(side.other()) as usize][pawn_square as usize] + PIECE_VALUE_MG[Piece::pawn(side.other()) as usize];
+            board.eg_score -= PST_EG[Piece::pawn(side.other()) as usize][pawn_square as usize] + PIECE_VALUE_EG[Piece::pawn(side.other()) as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::pawn(side.other()) as usize][pawn_square as usize];
         }
         Flag::PAWNPUSH => {
@@ -88,7 +92,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
                 board.pieces[Piece::WhiteRook as usize] |= 1 << Square::f1 as u8;
                 board.mailbox[Square::h1 as usize] = None;
                 board.mailbox[Square::f1 as usize] = Some(Piece::WhiteRook);
-                board.score += PST[Piece::WhiteRook as usize][Square::f1 as usize] - PST[Piece::WhiteRook as usize][Square::h1 as usize];
+                board.mg_score += PST_MG[Piece::WhiteRook as usize][Square::f1 as usize] - PST_MG[Piece::WhiteRook as usize][Square::h1 as usize];
+                board.eg_score += PST_EG[Piece::WhiteRook as usize][Square::f1 as usize] - PST_EG[Piece::WhiteRook as usize][Square::h1 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::WhiteRook as usize][Square::h1 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::WhiteRook as usize][Square::f1 as usize];
             } else {
@@ -96,7 +101,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
                 board.pieces[Piece::BlackRook as usize] |= 1 << Square::f8 as u8;
                 board.mailbox[Square::h8 as usize] = None;
                 board.mailbox[Square::f8 as usize] = Some(Piece::BlackRook);
-                board.score += PST[Piece::BlackRook as usize][Square::f8 as usize] - PST[Piece::BlackRook as usize][Square::h8 as usize];
+                board.mg_score += PST_MG[Piece::BlackRook as usize][Square::f8 as usize] - PST_MG[Piece::BlackRook as usize][Square::h8 as usize];
+                board.eg_score += PST_EG[Piece::BlackRook as usize][Square::f8 as usize] - PST_EG[Piece::BlackRook as usize][Square::h8 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::BlackRook as usize][Square::h8 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::BlackRook as usize][Square::f8 as usize];
             }
@@ -107,7 +113,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
                 board.pieces[Piece::WhiteRook as usize] |= 1 << Square::d1 as u8;
                 board.mailbox[Square::a1 as usize] = None;
                 board.mailbox[Square::d1 as usize] = Some(Piece::WhiteRook);
-                board.score += PST[Piece::WhiteRook as usize][Square::d1 as usize] - PST[Piece::WhiteRook as usize][Square::a1 as usize];
+                board.mg_score += PST_MG[Piece::WhiteRook as usize][Square::d1 as usize] - PST_MG[Piece::WhiteRook as usize][Square::a1 as usize];
+                board.eg_score += PST_EG[Piece::WhiteRook as usize][Square::d1 as usize] - PST_EG[Piece::WhiteRook as usize][Square::a1 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::WhiteRook as usize][Square::a1 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::WhiteRook as usize][Square::d1 as usize];
             } else {
@@ -115,7 +122,8 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
                 board.pieces[Piece::BlackRook as usize] |= 1 << Square::d8 as u8;
                 board.mailbox[Square::a8 as usize] = None;
                 board.mailbox[Square::d8 as usize] = Some(Piece::BlackRook);
-                board.score += PST[Piece::BlackRook as usize][Square::d8 as usize] - PST[Piece::BlackRook as usize][Square::a8 as usize];
+                board.mg_score += PST_MG[Piece::BlackRook as usize][Square::d8 as usize] - PST_MG[Piece::BlackRook as usize][Square::a8 as usize];
+                board.eg_score += PST_EG[Piece::BlackRook as usize][Square::d8 as usize] - PST_EG[Piece::BlackRook as usize][Square::a8 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::BlackRook as usize][Square::a8 as usize];
                 board.hash ^= POSITION_PIECE_HASH[Piece::BlackRook as usize][Square::d8 as usize];
             }
@@ -123,25 +131,29 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
         Flag::KNIGHTPROM | Flag::KNIGHTPROMCAP => {
             board.pieces[Piece::knight(side) as usize] |= target_bb;
             board.mailbox[mv.target_square() as usize] = Some(Piece::knight(side));
-            board.score += PIECE_VALUE[Piece::knight(side) as usize] + PST[Piece::knight(side) as usize][mv.target_square() as usize];
+            board.mg_score += PIECE_VALUE_MG[Piece::knight(side) as usize] + PST_MG[Piece::knight(side) as usize][mv.target_square() as usize];
+            board.eg_score += PIECE_VALUE_EG[Piece::knight(side) as usize] + PST_EG[Piece::knight(side) as usize][mv.target_square() as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::knight(side) as usize][mv.target_square() as usize];
         },
         Flag::BISHOPPROM | Flag::BISHOPPROMCAP => {
             board.pieces[Piece::bishop(side) as usize] |= target_bb;
             board.mailbox[mv.target_square() as usize] = Some(Piece::bishop(side));
-            board.score += PIECE_VALUE[Piece::bishop(side) as usize] + PST[Piece::bishop(side) as usize][mv.target_square() as usize];
+            board.mg_score += PIECE_VALUE_MG[Piece::bishop(side) as usize] + PST_MG[Piece::bishop(side) as usize][mv.target_square() as usize];
+            board.eg_score += PIECE_VALUE_EG[Piece::bishop(side) as usize] + PST_EG[Piece::bishop(side) as usize][mv.target_square() as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::bishop(side) as usize][mv.target_square() as usize];
         },
         Flag::ROOKPROM | Flag::ROOKPROMCAP => {
             board.pieces[Piece::rook(side) as usize] |= target_bb;
             board.mailbox[mv.target_square() as usize] = Some(Piece::rook(side));
-            board.score += PIECE_VALUE[Piece::rook(side) as usize] + PST[Piece::rook(side) as usize][mv.target_square() as usize];
+            board.mg_score += PIECE_VALUE_MG[Piece::rook(side) as usize] + PST_MG[Piece::rook(side) as usize][mv.target_square() as usize];
+            board.eg_score += PIECE_VALUE_EG[Piece::rook(side) as usize] + PST_EG[Piece::rook(side) as usize][mv.target_square() as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::rook(side) as usize][mv.target_square() as usize];
         },
         Flag::QUEENPROM | Flag::QUEENPROMCAP => {
             board.pieces[Piece::queen(side) as usize] |= target_bb;
             board.mailbox[mv.target_square() as usize] = Some(Piece::queen(side));
-            board.score += PIECE_VALUE[Piece::queen(side) as usize] + PST[Piece::queen(side) as usize][mv.target_square() as usize];
+            board.mg_score += PIECE_VALUE_MG[Piece::queen(side) as usize] + PST_MG[Piece::queen(side) as usize][mv.target_square() as usize];
+            board.eg_score += PIECE_VALUE_EG[Piece::queen(side) as usize] + PST_EG[Piece::queen(side) as usize][mv.target_square() as usize];
             board.hash ^= POSITION_PIECE_HASH[Piece::queen(side) as usize][mv.target_square() as usize];
         },
     }
@@ -328,7 +340,8 @@ pub struct UnmakeInfo {
     pub(crate) captured: Option<Piece>,
     pub(crate) hash: u64,
     pub(crate) start_idx: usize,
-    pub(crate) score: i16,
+    pub(crate) mg_score: i16,
+    pub(crate) eg_score: i16,
     pub(crate) repetitions: u8,
     pub(crate) white_in_check: bool,
     pub(crate) black_in_check: bool,
@@ -346,7 +359,8 @@ impl UnmakeInfo {
             captured: None,
             hash: board.hash,
             start_idx: board.history.start_idx,
-            score: board.score,
+            mg_score: board.mg_score,
+            eg_score: board.eg_score,
             repetitions: board.repetitions,
             white_in_check: board.white_in_check,
             black_in_check: board.black_in_check
@@ -362,7 +376,8 @@ impl UnmakeInfo {
         board.hash = self.hash;
         board.history.start_idx = self.start_idx;
         board.history.pop();
-        board.score = self.score;
+        board.mg_score = self.mg_score;
+        board.eg_score = self.eg_score;
         board.repetitions = self.repetitions;
         board.white_in_check = self.white_in_check;
         board.black_in_check = self.black_in_check;
