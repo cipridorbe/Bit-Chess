@@ -29,10 +29,11 @@ pub fn retrieve_score(score: i16, plies: u8) -> i16 {
     }
 }
 
-pub fn search(board: &mut Board, max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64]) -> Option<Move> {
+pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64]) -> Option<Move> {
     let mut state = SearchState::new_search(tt, history);
     let mut best_move = None;
     let mut iteration_score = 0;
+    max_depth += if board.is_pawn_endgame() { 3 } else { 0 };
     for depth in 1..=max_depth {
         state.max_depth = depth;
         let tt_best = state.tt.find(board.hash).and_then(|e| e.best_move);
@@ -127,10 +128,16 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         moved = true;
         let score = if board.is_rule_draw() {
             0
-        } else if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
-            let low_score = -negamax(board, -alpha-1, -alpha, depth - 2, ply + 1, true, state);
-            if low_score > alpha {
-                -negamax(board, -beta, -alpha, depth - 1, ply + 1, true, state)
+        } else if i != 0 {
+            let search_depth = depth - if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
+                2
+            } else {
+                1
+            };
+            let low_score = -negamax(board, -alpha-1, -alpha, search_depth, ply + 1, true, state);
+            if low_score > alpha || low_score.abs() > MATE_CUTOFF {
+                let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
+                -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
             } else {
                 low_score
             }

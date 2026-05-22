@@ -4,6 +4,8 @@ mod king;
 use once_cell::sync::Lazy;
 use crate::{bitboard::{Board, Piece, Side}, eval::{king::king_bonus, pawn::pawn_bonus}, util::squares};
 
+pub const BISHOP_PAIR_BONUS: i16 = 50;
+
 // PeSTO piece values (centipawns). MG rewards development; EG rewards pawns and rooks.
 pub const PIECE_VALUE_MG: [i16; 12] = [
      82,  337,  365,  477, 1025, 0,
@@ -209,6 +211,13 @@ pub fn mg_eval(board: &Board) -> i16 {
 /// Evaluates the endgame position absolutely
 pub fn eg_eval(board: &Board) -> i16 {
     eg_piece_eval(board) + eg_piece_position_bonus(board)
+}
+
+/// Evaluates bishop bonuses
+pub fn bishop_bonus(board: &Board) -> i16 {
+    let white = board.pieces[Piece::WhiteBishop as usize].count_ones();
+    let black = board.pieces[Piece::BlackBishop as usize].count_ones();
+    (white >= 2) as i16 * BISHOP_PAIR_BONUS - (black >= 2) as i16 * BISHOP_PAIR_BONUS
 }
 
 /// Evaluates the given position with respect to the current player. If the
