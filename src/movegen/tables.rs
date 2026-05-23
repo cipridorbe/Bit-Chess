@@ -126,6 +126,27 @@ pub static ROOK_MASK: Lazy<[u64; 64]> = Lazy::new(|| {
     table
 });
 
+/// Rook attacks on an empty bitboard
+pub static ROOK_EMPTY_ATTAKCS: Lazy<[u64; 64]> = Lazy::new(|| {
+    let mut table = [0; 64];
+    for square in all_squares() {
+        let (rank, file) = square.to_rank_file();
+        let mut mask = 0;
+        for r in 0..8 {
+            if r == rank { continue; }
+            let attacked_square = Square::from_rank_file(r, file);
+            mask |= 1 << attacked_square as u8;
+        }
+        for f in 0..8 {
+            if f == file { continue; }
+            let attacked_square = Square::from_rank_file(rank, f);
+            mask |= 1 << attacked_square as u8;
+        }
+        table[square as usize] = mask;
+    }
+    table
+});
+
 /// Mask for board occupancy when calculating bishop attacks.
 /// The mask consists of the squares the bishop would attack in an empty board,
 /// not including the last squares
@@ -149,6 +170,35 @@ pub static BISHOP_MASK: Lazy<[u64; 64]> = Lazy::new(|| {
             let r = rank as i8 - i;
             let f = file as i8 + i;
             if r <= 0 || r >= 7 || f <= 0 || f >= 7 { continue; }
+            let attacked_square = Square::from_rank_file(r as u8, f as u8);
+            mask |= 1 << attacked_square as u8;
+        }
+        table[square as usize] = mask;
+    }
+    table
+});
+
+/// Bishop attacks on an empty bitboard
+pub static BISHOP_EMPTY_ATTACKS: Lazy<[u64; 64]> = Lazy::new(|| {
+    let mut table = [0; 64];
+    for square in all_squares() {
+        let (rank, file) = square.to_rank_file();
+        let mut mask = 0;
+        // antidiagonal
+        for i in -8..8 {
+            if i == 0 { continue; }
+            let r = rank as i8 + i;
+            let f = file as i8 + i;
+            if r < 0 || r >= 8 || f < 0 || f >= 8 { continue; }
+            let attacked_square = Square::from_rank_file(r as u8, f as u8);
+            mask |= 1 << attacked_square as u8;
+        }
+        // main diagonal
+        for i in -8..8 {
+            if i == 0 { continue; }
+            let r = rank as i8 - i;
+            let f = file as i8 + i;
+            if r < 0 || r >= 8 || f < 0 || f >= 8 { continue; }
             let attacked_square = Square::from_rank_file(r as u8, f as u8);
             mask |= 1 << attacked_square as u8;
         }

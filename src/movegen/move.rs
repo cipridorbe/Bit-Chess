@@ -191,7 +191,7 @@ impl Move {
     }
 
     /// Scores a move by the given tables
-    pub fn score(self, board: &Board, predicted_best: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64]) -> i16 {
+    pub fn score(self, board: &Board, predicted_best: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> i16 {
         if Some(self) == predicted_best {
             return i16::MAX;
         }
@@ -203,10 +203,13 @@ impl Move {
             return victim_score * 10 - attacker_score + 10000;
         }
         if Some(self) == killers[0] {
-            return 9500;
+            return 9900;
         }
         if Some(self) == killers[1] {
-            return 9000;
+            return 9850;
+        }
+        if Some(self) == counter_move {
+            return 9800;
         }
         return history[self.source_square() as usize][self.target_square() as usize];
     }
@@ -244,10 +247,10 @@ impl MoveList {
         self.length += 1;
     }
 
-    pub fn sort(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64]) {
+    pub fn sort(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) {
         let mut scores = [0i16; 218];
         for i in 0..self.length {
-            scores[i] = self.moves[i].score(board, predicted_best_move, killers, history);
+            scores[i] = self.moves[i].score(board, predicted_best_move, killers, history, counter_move);
         }
         for i in 1..self.length {
             let key = self.moves[i];

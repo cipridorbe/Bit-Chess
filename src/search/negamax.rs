@@ -28,8 +28,8 @@ pub fn retrieve_score(score: i16, plies: u8) -> i16 {
     }
 }
 
-pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64]) -> Option<Move> {
-    let mut state = SearchState::new_search(tt, history);
+pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64], counter_move: &mut [[Option<Move>; 64]; 64]) -> Option<Move> {
+    let mut state = SearchState::new_search(tt, history, counter_move);
     let mut best_move = None;
     let mut iteration_score = 0;
     max_depth += if board.is_pawn_endgame() { 3 } else { 0 };
@@ -37,7 +37,7 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
         state.max_depth = depth;
         let tt_best = state.tt.find(board.hash).and_then(|e| e.best_move);
         let mut movelist = generate_movelist(&board, false);
-        movelist.sort(&board, tt_best, &state.killers[0], state.history);
+        movelist.sort(&board, tt_best, &state.killers[0], state.history, None);
 
         let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - DELTA_SEARCH };
         let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + DELTA_SEARCH };
@@ -55,7 +55,7 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
                 let score = if board.is_rule_draw() {
                     0
                 } else {
-                    -negamax(board, -aspiration_beta, -alpha, depth, 0, false, &mut state)
+                    -negamax(board, -aspiration_beta, -alpha, depth, 0, false, None, &mut state)
                 };
                 unmake_move(board, mv, &unmake);
                 if score > best_score {
@@ -90,21 +90,21 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
         full_search_depth = depth;
     }
     if i == 0 {
-        return -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, state)
+        return -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state)
     }
 
     let mut reduced_depth_search = depth - 1;
     if i > captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
         reduced_depth_search = depth - 2;
     }
-    let mut score = -negamax(board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, state);
+    let mut score = -negamax(board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, Some(mv), state);
     if score > alpha || score.abs() > MATE_CUTOFF {
-        score = -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, state);
+        score = -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state);
     } 
     score
 }
 
-pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &MoveList, skip_quiet: bool, skip_tried: bool, state: &mut SearchState) -> (i16, Option<Move>, bool) {
+pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &MoveList, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
     let mut value = -INF;
     let mut best_move = None;
     let mut moved = false;
@@ -128,14 +128,14 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
         }
         alpha = i16::max(alpha, score);
         if alpha >= beta {
-            state.beta_cutoff(mv, depth, ply);
+            state.beta_cutoff(mv, previous_move, depth, ply);
             break;
         }
     }
     (value, best_move, moved)
 }
 
-pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, state: &mut SearchState) -> i16 {
+pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, previous_move: Option<Move>, state: &mut SearchState) -> i16 {
     unsafe { NODE_COUNT += 1; }
     let mut predicted_best_move = None;
     if let Some(entry) = state.tt.find(board.hash) {
@@ -157,7 +157,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
 
     if allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
-        let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, state);
+        let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state);
         unmake_null_move(board, &unmake);
         if null_move_score >= beta {
             let insert_score = store_score(null_move_score, ply);
@@ -169,14 +169,15 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     let original_alpha = alpha;
     let skip_quiet = depth == 1 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN < alpha;
     let mut movelist = generate_movelist(board, false);
-    movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history);
+    let counter = previous_move.and_then(|pm| state.counter_move[pm.source_square() as usize][pm.target_square() as usize]);
+    movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
 
     let (mut value, mut best_move, mut moved)
-        = search_moves(board, alpha, beta, depth, ply, &movelist, skip_quiet, false, state);
+        = search_moves(board, alpha, beta, depth, ply, &movelist, skip_quiet, false, previous_move, state);
     
     if !moved && skip_quiet {
         (value, best_move, moved)
-            = search_moves(board, alpha, beta, depth, ply, &movelist, false, true, state);
+            = search_moves(board, alpha, beta, depth, ply, &movelist, false, true, previous_move, state);
     }
 
     if !moved {

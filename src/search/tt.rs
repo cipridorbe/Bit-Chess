@@ -103,13 +103,15 @@ mod tests {
 
     fn bench(with_tt: bool, depth: u8, cutoff: u8, iters: i32) -> std::time::Duration {
         use crate::movegen::makemove::make_move;
+        use crate::movegen::r#move::Move;
         let mut tt = if with_tt { TT::new(23, cutoff) } else { TT::new_disabled() };
         let mut history = [[0; 64]; 64];
+        let mut counter_move = [[None::<Move>; 64]; 64];
         let start = Instant::now();
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
             for _ in 0..iters {
-                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history) {
+                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
                     make_move(&mut board, mv);
                 }
             }
@@ -149,17 +151,19 @@ mod tests {
     fn node_count() {
         use crate::search::negamax::NODE_COUNT;
         use crate::movegen::makemove::make_move;
+        use crate::movegen::r#move::Move;
         let depth = 9;
         let iters = 7;
         // let mut tt = TT::new_disabled();
         let mut tt = TT::new(22, 2);
         let mut history = [[0; 64]; 64];
+        let mut counter_move = [[None::<Move>; 64]; 64];
         unsafe { NODE_COUNT = 0; }
         let start = Instant::now();
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
             for _ in 0..iters {
-                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history) {
+                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
                     make_move(&mut board, mv);
                 }
             }

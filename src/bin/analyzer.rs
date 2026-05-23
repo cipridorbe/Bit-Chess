@@ -82,6 +82,7 @@ fn run_analysis(req: AnalyzeRequest) -> Vec<AnalysisFrame> {
     let _engine_side = &req.engine_side;
     let mut tt = TT::new(22, 2);
     let mut history = Box::new([[0i16; 64]; 64]);
+    let mut counter_move = Box::new([[None::<Move>; 64]; 64]);
     let mut frames = Vec::new();
 
     for (i, mv_str) in req.moves.iter().enumerate() {
@@ -91,7 +92,7 @@ fn run_analysis(req: AnalyzeRequest) -> Vec<AnalysisFrame> {
 
         let (eval, best_mv, matches, tt_before, tt_after, hist) = if is_engine {
             let before = tt_info(&tt, hash);
-            let found = search(&mut board, 6, &mut tt, &mut history);
+            let found = search(&mut board, 6, &mut tt, &mut history, &mut counter_move);
             let after = tt_info(&tt, board.hash());
             let eval = after.as_ref().map(|e| e.score);
             let uci = found.map(|m| m.to_uci());

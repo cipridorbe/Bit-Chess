@@ -277,7 +277,7 @@ pub struct Board {
     pub(crate) occupied: u64,
 
     /// The player to play in current turn
-    pub(crate) side: Side,
+    pub side: Side,
 
     /// Castling information, stored as 0000 bq bk wq wk
     pub(crate) castling: u8,
