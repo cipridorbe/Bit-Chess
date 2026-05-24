@@ -291,8 +291,11 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
     let mut value = stand_pat;
     let mut movelist = generate_movelist(board, !in_check);
     let mut moved = false;
-    movelist.sort_mvvlva(board, None);
-    for mv in movelist.iter() {
+    let see_scores = movelist.sort_see(board);
+    for (i, mv) in movelist.iter().enumerate() {
+        if !in_check && see_scores[i] < 0 {
+            break;
+        }
         let unmake = make_move(board, mv);
         if board.in_check(board.side.other()) {
             unmake_move(board, mv, &unmake);

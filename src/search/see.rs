@@ -1,4 +1,4 @@
-use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
+use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
 
 const VALUE: [i16; 12] = [
     01, 03, 03, 05, 09, 99,
@@ -85,6 +85,83 @@ pub fn see(board: &Board, initial_move: Move) -> i16 {
         i -= 1;
     }
     return scores[0];
+}
+
+pub fn see_sign(board: &Board, initial_move: Move) -> i16 {
+    let mut occupied = board.occupied;
+    let mut last_moved = board.piece_at(initial_move.source_square()).unwrap();
+    let mut captured_piece = board.piece_at(initial_move.target_square());
+    if initial_move.flag() == Flag::ENPASSANT {
+        captured_piece = Some(Piece::WhitePawn);
+        if board.side == Side::White {
+            occupied &= !(1 << (initial_move.target_square() as u8 - 8));
+        } else {
+            occupied &= !(1 << (initial_move.target_square() as u8 +8));
+        }
+    }
+    if initial_move.is_capture() && VALUE_ABS[captured_piece.unwrap() as usize] > VALUE_ABS[last_moved as usize] {
+        return VALUE_ABS[captured_piece.unwrap() as usize] - VALUE_ABS[last_moved as usize];
+    }
+    
+    let prom_rank = initial_move.target_square().rank() == 0 || initial_move.target_square().rank() == 7;
+    occupied &= !(1 << initial_move.source_square() as u8);
+    let mut scores = [0; 32];
+    if let Some(captured) = captured_piece {
+        scores[0] = VALUE_ABS[captured as usize];
+    }
+    let mut side = board.side.other();
+    let mut i = 1;
+    while let Some((mut attacker, bb)) = get_lva(board, initial_move.target_square(), side, occupied) {
+        scores[i] = VALUE_ABS[last_moved as usize] - scores[i - 1];
+        if scores[i] > VALUE_ABS[attacker as usize] {
+            i += 1;
+            break;
+        }
+        if (attacker == Piece::WhitePawn || attacker == Piece::BlackPawn) && prom_rank {
+            attacker = Piece::WhiteQueen;
+            scores[i] += VALUE_ABS[Piece::WhiteQueen as usize] - VALUE_ABS[Piece::WhitePawn as usize];
+        }
+        last_moved = attacker;
+        occupied &= !(bb);
+        side = side.other();
+        i += 1;
+    }
+    i -= 1;
+    while i > 0 {
+        scores[i - 1] = -i16::max(-scores[i - 1], scores[i]);
+        i -= 1;
+    }
+    return scores[0];
+}
+
+pub fn get_lva(board: &Board, square: Square, side: Side, occupied: u64) -> Option<(Piece, u64)> {
+    let mut bb = pawn_attacks(1 << square as u8, side.other()) & board.pieces[Piece::pawn(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhitePawn, bb & bb.wrapping_neg()));
+    }
+    bb = knight_attacks(1 << square as u8) & board.pieces[Piece::knight(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhiteKnight, bb & bb.wrapping_neg()));
+    }
+    let bishop = single_bishop_attacks(square, occupied);
+    bb = bishop & board.pieces[Piece::bishop(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhiteBishop, bb & bb.wrapping_neg()));
+    }
+    let rook = single_rook_attacks(square, occupied); 
+    bb = rook & board.pieces[Piece::rook(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhiteRook, bb & bb.wrapping_neg()));
+    }
+    bb = (bishop | rook) & board.pieces[Piece::queen(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhiteQueen, bb & bb.wrapping_neg()));
+    }
+    bb = king_attacks(1 << square as u8) & board.pieces[Piece::king(side) as usize] & occupied;
+    if bb != 0 {
+        return Some((Piece::WhiteKing, bb & bb.wrapping_neg()));
+    }
+    None
 }
 
 pub fn add_hidden_bishop(board: &Board, square: Square, side: Side, seelists: &mut [SEEList; 2], idx: usize, occupancy: u64) {
@@ -339,20 +416,29 @@ mod tests {
         for test in SEE_TESTS {
             println!("{}", test.fen);
             let board = Board::from_fen(test.fen);
-
-            // Replace this with however your engine parses UCI moves.
             let mv = Move::from_uci(&board, test.mv);
-
             let result = see(&board, mv);
-
             assert_eq!(
                 result,
                 test.expected,
                 "SEE failed:\nFEN: {}\nMove: {}\nExpected: {}\nGot: {}",
-                test.fen,
-                test.mv,
-                test.expected,
-                result
+                test.fen, test.mv, test.expected, result
+            );
+        }
+    }
+
+    #[test]
+    fn test_see_sign_suite() {
+        for test in SEE_TESTS {
+            println!("{}", test.fen);
+            let board = Board::from_fen(test.fen);
+            let mv = Move::from_uci(&board, test.mv);
+            let result = see_sign(&board, mv);
+            assert_eq!(
+                result.signum(),
+                test.expected.signum(),
+                "see_sign failed:\nFEN: {}\nMove: {}\nExpected sign: {}\nGot: {}",
+                test.fen, test.mv, test.expected.signum(), result
             );
         }
     }
