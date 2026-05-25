@@ -315,6 +315,9 @@ pub struct Board {
 
     /// Whether black is in check
     pub(crate) black_in_check: bool,
+
+    /// Phase of the game
+    pub(crate) phase: u8,
 }
 
 impl Board {
@@ -553,9 +556,10 @@ impl Board {
         let mut history = HashHistory::new();
         history.hashes.push(hash);
 
-        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, mg_score: 0, eg_score: 0, repetitions: 1, white_in_check: false, black_in_check: false };
+        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, mg_score: 0, eg_score: 0, repetitions: 1, white_in_check: false, black_in_check: false, phase: 0 };
         b.mg_score = mg_eval(&b);
         b.eg_score = eg_eval(&b);
+        b.phase = b.calculate_phase();
         let white_attacks = all_attacks(&b, Side::White);
         let black_attacks = all_attacks(&b, Side::Black);
         b.white_in_check = black_attacks & b.pieces[Piece::WhiteKing as usize] != 0; 
@@ -563,11 +567,17 @@ impl Board {
         b
     }
 
+    // calculates the phase of the game
+    pub fn calculate_phase(&self) -> u8 {
+        let phase1 = self.pieces[Piece::WhiteKnight as usize] | self.pieces[Piece::BlackKnight as usize] | self.pieces[Piece::WhiteBishop as usize] | self.pieces[Piece::BlackBishop as usize];
+        let phase2 = self.pieces[Piece::WhiteRook as usize] | self.pieces[Piece::BlackRook as usize];
+        let phase4 = self.pieces[Piece::WhiteQueen as usize] | self.pieces[Piece::BlackQueen as usize];
+        (phase1.count_ones() + phase2.count_ones() * 2 + phase4.count_ones() * 4) as u8
+    }
+
     // Returns true if the current move has non pawn pieces left
     pub fn has_non_pawn_pieces(&self) -> bool {
-        let pawn = Piece::pawn(self.side);
-        let king = Piece::king(self.side);
-        self.sides[self.side as usize] & !(self.pieces[pawn as usize] | self.pieces[king as usize]) != 0
+        self.phase != 0
     }
 
     // Returns true if it is a pawn endgame
