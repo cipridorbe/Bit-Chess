@@ -1,5 +1,7 @@
 use crate::{movegen::r#move::Move, search::{tt::TT}};
 
+const MAX_HISTORY: i16 = 8192;
+
 pub struct SearchState<'a> {
     pub(crate) killers: [[Option<Move>; 2]; 48],
     pub(crate) tt: &'a mut TT,
@@ -27,7 +29,7 @@ impl<'a> SearchState<'a> {
         }
     }
 
-    pub fn beta_cutoff(&mut self, mv: Move, prev_move: Option<Move>, depth: u8, ply: u8) {
+    pub fn beta_cutoff(&mut self, mv: Move, prev_move: Option<Move>, depth: u8, ply: u8, tried_quiets: &[Move]) {
         if mv.is_capture() {
             return;
         }
@@ -38,6 +40,14 @@ impl<'a> SearchState<'a> {
         if let Some(prev) = prev_move {
             self.counter_move[prev.source_square() as usize][prev.target_square() as usize] = Some(mv);
         }
-        self.history[mv.source_square() as usize][mv.target_square() as usize] += (depth*depth) as i16;
+        let bonus = (depth * depth) as i16;
+        let entry = self.history[mv.source_square() as usize][mv.target_square() as usize];
+        self.history[mv.source_square() as usize][mv.target_square() as usize]
+            += bonus - (entry as i32 * bonus as i32 / MAX_HISTORY as i32) as i16;
+        for quiet in tried_quiets {
+            let entry = self.history[quiet.source_square() as usize][quiet.target_square() as usize];
+            self.history[quiet.source_square() as usize][quiet.target_square() as usize]
+                += -bonus - (entry as i32 * bonus as i32 / MAX_HISTORY as i32) as i16;
+        }
     }
 }

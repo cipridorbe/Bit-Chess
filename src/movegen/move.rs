@@ -24,7 +24,7 @@
 
 use std::num::NonZeroU16;
 
-use crate::{bitboard::{Board, Piece, Square}, search::see::see};
+use crate::{bitboard::{Board, Piece, Square}, search::see::{see, see_sign}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
@@ -196,17 +196,20 @@ impl Move {
             return i16::MAX;
         }
         if self.is_capture() {
-            let see = see(board, self);
-            if see >= 0 {
-                return see + 10000;
-            } else {
-                return see;
+            let see = see_sign(board, self);
+            if see < 0 {
+                return see - 10000;
             }
-            // let attacker = board.piece_at(self.source_square());
-            // let victim = board.piece_at(self.target_square());
-            // let attacker_score = Move::mvvlva_score(attacker);
-            // let victim_score = Move::mvvlva_score(victim);
-            // return victim_score * 10 - attacker_score + 10000;
+            let attacker = board.piece_at(self.source_square());
+            let victim = board.piece_at(self.target_square());
+            let attacker_score = Move::mvvlva_score(attacker);
+            let victim_score = Move::mvvlva_score(victim);
+            let mvv =  victim_score * 10 - attacker_score;
+            if see == 0 {
+                return mvv + 9910;
+            } else {
+                return mvv + 10000;
+            }
         }
         if Some(self) == killers[0] {
             return 9900;
@@ -278,6 +281,26 @@ impl MoveList {
         let mut scores = [0i16; 218];
         for i in 0..self.captures {
             scores[i] = see(board, self.moves[i]);
+        }
+        for i in 1..self.captures {
+            let key = self.moves[i];
+            let key_score = scores[i];
+            let mut j = i;
+            while j > 0 && scores[j - 1] < key_score {
+                self.moves[j] = self.moves[j - 1];
+                scores[j] = scores[j - 1];
+                j -= 1;
+            }
+            self.moves[j] = key;
+            scores[j] = key_score;
+        }
+        scores
+    }
+
+    pub fn sort_see_sign(&mut self, board: &Board) -> [i16; 218] {
+        let mut scores = [0i16; 218];
+        for i in 0..self.captures {
+            scores[i] = see_sign(board, self.moves[i]);
         }
         for i in 1..self.captures {
             let key = self.moves[i];

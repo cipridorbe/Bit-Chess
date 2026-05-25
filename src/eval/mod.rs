@@ -19,10 +19,10 @@ pub const PIECE_VALUE_EG: [i16; 12] = [
 ];
 
 // // Keep the original for existing code until tapered eval is wired up.
-// pub const PIECE_VALUE: [i16; 12] = [
-//     0100, 0300, 0300, 0500, 0900, 000,
-//     -100, -300, -300, -500, -900, 000
-// ];
+pub const PIECE_VALUE: [i16; 12] = [
+    0100, 0300, 0300, 0500, 0900, 000,
+    -100, -300, -300, -500, -900, 000
+];
 
 // ---------------------------------------------------------------------------
 // PeSTO piece-square tables — rank 1 first (a1 = index 0), file a..h.

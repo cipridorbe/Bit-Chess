@@ -1,9 +1,4 @@
-use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{bishop_attacks, king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
-
-const VALUE: [i16; 12] = [
-    01, 03, 03, 05, 09, 99,
-    -1, -3, -3, -5, -9, -99,
-];
+use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
 
 const VALUE_ABS: [i16; 12] = [
     1, 3, 3, 5, 9, 99,
@@ -303,7 +298,7 @@ mod tests {
     }
 
     const PAWN: i16 = 1;
-    const KNIGHT: i16 = 3;
+    // const KNIGHT: i16 = 3;
     const BISHOP: i16 = 3;
     const ROOK: i16 = 5;
     const QUEEN: i16 = 9;
