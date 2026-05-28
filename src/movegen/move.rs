@@ -22,7 +22,7 @@
   1 1 1 1  Queen promotion capture  
 */
 
-use std::num::NonZeroU16;
+use std::{mem::MaybeUninit, num::NonZeroU16};
 
 use crate::{bitboard::{Board, Piece, Square}, search::see::{see, see_sign}};
 
@@ -305,7 +305,7 @@ impl MoveList {
 
     /// Scores the movelist
     pub fn scores(&self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> [i16; 218] {
-        let mut scores = [0i16; 218];
+        let mut scores: [i16; 218] = unsafe { std::mem::transmute([MaybeUninit::<i16>::uninit(); 218]) };
         for i in 0..self.length {
             scores[i] = self.moves[i].score(board, predicted_best_move, killers, history, counter_move);
         }

@@ -2,6 +2,8 @@
 Implementation of negamax, used as the main search algorithm.
 */
 
+use once_cell::sync::Lazy;
+
 use crate::{bitboard::{Board, Piece, Square}, eval::{PIECE_VALUE, relative_eval}, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::{Flag, LazyMoveIter, Move}}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
@@ -9,9 +11,27 @@ const MATE_CUTOFF: i16 = 29000;
 pub const INF: i16 = 31000;
 const DELTA_SEARCH: i16 = 50;
 const FUTILITY_MARGIN: i16 = 150;
+const REV_FUTILITY_MARGIN: i16 = 200;
 const DELTA_PRUNING_MARGIN: i16 = 200;
 
 pub static mut NODE_COUNT: u64 = 0;
+pub static mut TT_LOOKUPS_DEPTH: [u64; 64] = [0; 64];
+pub static mut TT_LOOKUPS_PLY: [u64; 64] = [0; 64];
+pub static mut TT_LOOKUPS_DEPTH_SUCCESS: [u64; 64] = [0; 64];
+pub static mut TT_LOOKUPS_PLY_SUCESS: [u64; 64] = [0; 64];
+
+pub static LMR_TABLE: Lazy<[[u8; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[0; 64]; 64];
+
+    for d in 0..64 {
+        for m in 0..64 {
+            let r = 0.5 + (f64::ln(d as f64) + f64::ln(m as f64)) / 2.5;
+            table[d][m] = (r + 0.5) as u8;
+        }
+    }
+    
+    table
+});
 
 pub fn store_score(score: i16, plies: u8) -> i16 {
     if score.abs() > MATE_CUTOFF {
@@ -35,10 +55,10 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
     let mut best_move = None;
     let mut iteration_score = 0;
     max_depth += match board.phase {
-        0 => 5,
-        1..=4 => 3,
-        5..=9 => 2,
-        10..=13 => 1,
+        0 => 4,
+        1..=4 => 2,
+        5..=9 => 1,
+        10..=13 => 0,
         _ => 0
     };
     for depth in 1..=max_depth {
@@ -56,7 +76,7 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
             } else {
                 best_move = mv;
                 iteration_score = score;
-                if score > MATE_CUTOFF {
+                if score.abs() > MATE_CUTOFF {
                     return best_move
                 }
                 break;
@@ -68,7 +88,7 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
 
 pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, captures: usize, state: &mut SearchState) -> i16 {
     let mut full_search_depth = depth - 1;
-    if board.in_check(board.side) && ply < 2 * state.max_depth {
+    if board.in_check(board.side) && ply + depth < (state.max_depth + state.max_depth / 2) {
         full_search_depth = depth;
     }
     if i == 0 {
@@ -77,10 +97,11 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
 
     let mut reduced_depth_search = depth - 1;
     if i > captures + 3 && depth >= 3 && !mv.is_promotion() && ply > 1 && !board.in_check(board.side) {
-        reduced_depth_search = depth - 2;
+        let reduction = LMR_TABLE[depth.min(63) as usize][i.min(63) as usize];
+        reduced_depth_search = depth - reduction.min(depth - 1);
     }
     let mut score = -negamax(board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, Some(mv), state).0;
-    if score > alpha || score.abs() > MATE_CUTOFF {
+    if score > alpha {
         score = -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state).0;
     } 
     score
@@ -126,10 +147,18 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
 
 pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>) {
     unsafe { NODE_COUNT += 1; }
+
+    if depth == 0 {
+        return (quiescence(board, alpha, beta, ply), None);
+    }
+
+    let is_pv_node = beta > alpha + 1;
     let mut predicted_best_move = None;
+    unsafe { TT_LOOKUPS_DEPTH[depth.min(63) as usize] += 1; TT_LOOKUPS_PLY[ply.min(63) as usize] += 1; }
     if let Some(entry) = state.tt.find(board.hash) {
+        unsafe { TT_LOOKUPS_DEPTH_SUCCESS[depth.min(63) as usize] += 1; TT_LOOKUPS_PLY_SUCESS[ply.min(63) as usize] += 1; }
         predicted_best_move = entry.best_move;
-        if entry.depth >= depth && board.repetitions <= 1 {
+        if !is_pv_node && entry.depth >= depth && board.repetitions <= 1 {
             let retrieved_score = retrieve_score(entry.score, ply);
             match entry.flag {
                 TTFlag::Exact => return (retrieved_score, predicted_best_move),
@@ -139,12 +168,8 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
             if alpha >= beta { return (retrieved_score, predicted_best_move); }
         }
     }
-    
-    if depth == 0 {
-        return (quiescence(board, alpha, beta, ply), None);
-    }
 
-    if allow_null_move && board.phase > 2 && beta < INF && depth > 3 && !board.in_check(board.side) {
+    if !is_pv_node && allow_null_move && board.phase > 2 && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
         let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state).0;
         unmake_null_move(board, &unmake);
@@ -155,13 +180,21 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         }
     }
 
-    let original_alpha = alpha;
-    let mut skip_quiet = depth == 1 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN < alpha;
-    skip_quiet = skip_quiet || depth == 2 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN * 3 < alpha;
-    // let mut movelist = generate_movelist(board, false);
-    let counter = previous_move.and_then(|pm| state.counter_move[pm.source_square() as usize][pm.target_square() as usize]);
-    // movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
+    if is_pv_node && depth >= 4 && predicted_best_move == None {
+        predicted_best_move = negamax(board, -beta, -alpha, depth / 2, ply, false, previous_move, state).1;
+    }
 
+    let mut skip_quiet = false; 
+    if ply > 0 && !is_pv_node && depth <= 2 && !board.in_check(board.side) {
+        let eval = relative_eval(board);
+        if eval - depth as i16 * REV_FUTILITY_MARGIN >= beta {
+            return (eval, None);
+        }
+        skip_quiet = eval + depth as i16 * FUTILITY_MARGIN < alpha;
+    }
+    let original_alpha = alpha;
+
+    let counter = previous_move.and_then(|pm| state.counter_move[pm.source_square() as usize][pm.target_square() as usize]);
     let mut lazymovelist = generate_movelist(board, false);
     let mut lazy_iter = lazymovelist.lazy_iter(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
 
@@ -252,4 +285,43 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
         return -(MATE_VAL - ply as i16)
     }
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LMR_TABLE;
+
+    fn colored(r: u8) -> String {
+        let code = match r {
+            0 => "2",        // dim
+            1 => "32",       // green
+            2 => "33",       // yellow
+            3 => "31",       // red
+            _ => "1;31",     // bold red
+        };
+        format!("\x1b[{}m{:>3}\x1b[0m", code, r)
+    }
+
+    #[test]
+    fn print_lmr_table() {
+        let table = &*LMR_TABLE;
+        let depths = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 32, 48, 63];
+        let moves  = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 30, 40, 50, 55, 63];
+
+        print!("{:>5}", "d\\m");
+        for m in moves { print!("{:>7}", m); }
+        println!();
+
+        print!("{:>5}", "----");
+        for _ in moves { print!("{:>7}", "---"); }
+        println!();
+
+        for d in depths {
+            print!("{:>5}", d);
+            for m in moves {
+                print!("    {}", colored(table[d][m]));
+            }
+            println!();
+        }
+    }
 }

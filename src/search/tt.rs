@@ -158,13 +158,35 @@ mod tests {
     }
 
     #[test]
-    fn tt_cutoff() {
-        let depth = 6;
-        let iters = 15;
-        println!("\ndepth {depth}, {iters} moves per position:");
-        for &cutoff in &[0u8, 1, 2, 5, 255] {
-            let t = bench(true, depth, cutoff, iters);
-            println!("  cutoff={cutoff:3}: {t:.2?}");
+    fn tt_age_weight() {
+        // Compare quality-based eviction at different age penalty weights.
+        // weight=0: depth-only (never evict a deeper entry regardless of age)
+        // weight=N: an entry N generations old can be replaced by one N plies shallower
+        // weight=255: effectively always-replace
+        use crate::search::negamax::NODE_COUNT;
+        use crate::movegen::makemove::make_move;
+        use crate::movegen::r#move::Move;
+        let depth = 7;
+        let iters = 8;
+        println!("\ndepth {depth}, {iters} moves per position ({} positions):", POSITIONS.len());
+        println!("  {:>8}  {:>10}  {:>10}", "weight", "time", "nodes");
+        for &weight in &[0u8, 1, 2, 4, 8, 255] {
+            unsafe { NODE_COUNT = 0; }
+            let mut tt = TT::new(22, weight);
+            let mut history = [[0i16; 64]; 64];
+            let mut counter_move = [[None::<Move>; 64]; 64];
+            let start = Instant::now();
+            for &fen in POSITIONS {
+                let mut board = Board::from_fen(fen);
+                for _ in 0..iters {
+                    if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
+                        make_move(&mut board, mv);
+                    }
+                }
+            }
+            let elapsed = start.elapsed();
+            let nodes = unsafe { NODE_COUNT };
+            println!("  {:>8}  {:>10.2?}  {:>10}", weight, elapsed, nodes);
         }
     }
 
@@ -202,5 +224,94 @@ mod tests {
             nodes,
             nodes as f64 / elapsed.as_secs_f64() / 1000.0,
         );
+    }
+
+    #[test]
+    fn tt_hit_rate() {
+        use crate::search::negamax::{
+            NODE_COUNT,
+            TT_LOOKUPS_DEPTH, TT_LOOKUPS_DEPTH_SUCCESS,
+            TT_LOOKUPS_PLY,   TT_LOOKUPS_PLY_SUCESS,
+        };
+        use crate::movegen::makemove::make_move;
+        use crate::movegen::r#move::Move;
+
+        fn hit_color(pct: f64) -> &'static str {
+            if pct >= 75.0 { "\x1b[32m" }       // green
+            else if pct >= 40.0 { "\x1b[33m" }  // yellow
+            else { "\x1b[31m" }                  // red
+        }
+        const RESET: &str = "\x1b[0m";
+
+        let search_depth = 9;
+        let iters = 4;
+        let mut tt = TT::new(22, 0);
+        let mut history = [[0i16; 64]; 64];
+        let mut counter_move = [[None::<Move>; 64]; 64];
+
+        unsafe {
+            NODE_COUNT = 0;
+            TT_LOOKUPS_DEPTH = [0; 64];
+            TT_LOOKUPS_PLY   = [0; 64];
+            TT_LOOKUPS_DEPTH_SUCCESS = [0; 64];
+            TT_LOOKUPS_PLY_SUCESS    = [0; 64];
+        }
+
+        let start = Instant::now();
+        for &fen in POSITIONS {
+            let mut board = Board::from_fen(fen);
+            for _ in 0..iters {
+                if let Some(mv) = search(&mut board, search_depth, &mut tt, &mut history, &mut counter_move) {
+                    make_move(&mut board, mv);
+                }
+            }
+        }
+        let elapsed = start.elapsed();
+
+        let (nodes, by_depth_l, by_depth_h, by_ply_l, by_ply_h) = unsafe {(
+            NODE_COUNT,
+            TT_LOOKUPS_DEPTH,
+            TT_LOOKUPS_DEPTH_SUCCESS,
+            TT_LOOKUPS_PLY,
+            TT_LOOKUPS_PLY_SUCESS,
+        )};
+
+        println!(
+            "\ndepth {search_depth}, {iters} moves × {} positions: {} nodes in {elapsed:.2?} ({:.0} knps)",
+            POSITIONS.len(), nodes,
+            nodes as f64 / elapsed.as_secs_f64() / 1000.0,
+        );
+
+        // ── By depth ──────────────────────────────────────────────────────────
+        println!("\n  TT lookups by depth (remaining depth):");
+        println!("  {:>5}  {:>10}  {:>10}  {:>8}  {:>10}", "depth", "lookups", "hits", "hit%", "misses");
+        println!("  {:>5}  {:>10}  {:>10}  {:>8}  {:>10}", "-----", "-------", "----", "----", "------");
+        for d in 0..64usize {
+            let l = by_depth_l[d];
+            if l == 0 { continue; }
+            let h = by_depth_h[d];
+            let pct = 100.0 * h as f64 / l as f64;
+            let col = hit_color(pct);
+            println!(
+                "  {:>5}  {:>10}  {:>10}  {col}{:>7.1}%{RESET}  {:>10}",
+                d, l, h, pct, l - h,
+            );
+        }
+
+        // ── By ply ────────────────────────────────────────────────────────────
+        println!("\n  TT lookups by ply (distance from root):");
+        println!("  {:>5}  {:>10}  {:>10}  {:>8}  {:>10}", "ply", "lookups", "hits", "hit%", "misses");
+        println!("  {:>5}  {:>10}  {:>10}  {:>8}  {:>10}", "---", "-------", "----", "----", "------");
+        for p in 0..64usize {
+            let l = by_ply_l[p];
+            if l == 0 { continue; }
+            let h = by_ply_h[p];
+            let pct = 100.0 * h as f64 / l as f64;
+            let col = hit_color(pct);
+            println!(
+                "  {:>5}  {:>10}  {:>10}  {col}{:>7.1}%{RESET}  {:>10}",
+                p, l, h, pct, l - h,
+            );
+        }
     }
 }

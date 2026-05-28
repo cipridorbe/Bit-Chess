@@ -64,7 +64,7 @@ async fn post_move(
     let mut last_move = None;
     if guard.board.side != guard.player_side {
         let s = &mut *guard;
-        if let Some(bot_mv) = search(&mut s.board, 8, &mut s.tt, &mut s.history, &mut s.counter_move) {
+        if let Some(bot_mv) = search(&mut s.board, 10, &mut s.tt, &mut s.history, &mut s.counter_move) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut guard.board, bot_mv);
         }
@@ -115,7 +115,7 @@ async fn new_game(
     let mut last_move = None;
     if guard.player_side == Side::Black {
         let s = &mut *guard;
-        if let Some(bot_mv) = search(&mut s.board, 8, &mut s.tt, &mut s.history, &mut s.counter_move) {
+        if let Some(bot_mv) = search(&mut s.board, 10, &mut s.tt, &mut s.history, &mut s.counter_move) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut guard.board, bot_mv);
         }

@@ -353,7 +353,7 @@ pub fn make_null_move(board: &mut Board) -> UnmakeInfo {
     if board.side == Side::Black {
         board.fullmoves += 1;
     }
-    board.halfmoves += 1;
+    board.halfmoves = 0;
     board.side = board.side.other();
     board.hash ^= SIDE_HASH[Side::White as usize] ^ SIDE_HASH[Side::Black as usize];
     if let Some(square) = board.enpassant {
@@ -361,7 +361,8 @@ pub fn make_null_move(board: &mut Board) -> UnmakeInfo {
         board.hash ^= ENPASSANT_HASH[file as usize];
         board.enpassant = None;
     }
-    board.repetitions = board.history.add(board.hash, Move::new(Flag::QUIET, Square::a2, Square::a2), Piece::WhiteKing);
+    board.history.hashes.push(board.hash);
+    board.repetitions = 0;
     board.white_in_check = false;
     board.black_in_check = false;
     unmake
