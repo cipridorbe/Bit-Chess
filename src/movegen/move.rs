@@ -24,7 +24,7 @@
 
 use std::{mem::MaybeUninit, num::NonZeroU16};
 
-use crate::{bitboard::{Board, Piece, Square}, search::see::{see, see_sign}};
+use crate::{bitboard::{Board, Piece, Square}, search::see::{see, see_positive, see_sign}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
@@ -250,6 +250,10 @@ impl Move {
         }
         return prom_bonus + history[self.source_square() as usize][self.target_square() as usize];
     }
+
+    pub fn see_negative_score(score: i16) -> i16 {
+        score + 10000
+    }
 }
 
 /// Simple list of possible moves in a single position. Capped at 218 as it 
@@ -284,7 +288,7 @@ impl MoveList {
         self.length += 1;
     }
 
-    pub fn sort(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) {
+    pub fn sort(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> [i16; 218] {
         let mut scores = [0i16; 218];
         for i in 0..self.length {
             scores[i] = self.moves[i].score(board, predicted_best_move, killers, history, counter_move);
@@ -301,6 +305,7 @@ impl MoveList {
             self.moves[j] = key;
             scores[j] = key_score;
         }
+        scores
     }
 
     /// Scores the movelist
@@ -338,6 +343,31 @@ impl MoveList {
         let mut scores = [0i16; 218];
         for i in 0..self.captures {
             scores[i] = see_sign(board, self.moves[i]);
+        }
+        for i in 1..self.captures {
+            let key = self.moves[i];
+            let key_score = scores[i];
+            let mut j = i;
+            while j > 0 && scores[j - 1] < key_score {
+                self.moves[j] = self.moves[j - 1];
+                scores[j] = scores[j - 1];
+                j -= 1;
+            }
+            self.moves[j] = key;
+            scores[j] = key_score;
+        }
+        scores
+    }
+
+    // see positive sort
+    pub fn qsort(&mut self, board: &Board, predicted_best_move: Option<Move>) -> [i16; 218] {
+        let mut scores = [0; 218];
+        for i in 0..self.captures {
+            if Some(self.moves[i]) == predicted_best_move {
+                scores[i] = i16::MAX;
+            } else {
+                scores[i] = see_positive(board, self.moves[i]);
+            }
         }
         for i in 1..self.captures {
             let key = self.moves[i];
@@ -415,7 +445,22 @@ impl MoveList {
     }
 
     pub fn lazy_iter(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> LazyMoveIter {
-        let scores = self.scores(board, predicted_best_move, killers, history, counter_move);
+        // let scores = self.scores(board, predicted_best_move, killers, history, counter_move);
+        let scores = self.sort(board, predicted_best_move, killers, history, counter_move);
+
+        LazyMoveIter {
+            sorted: self.length,
+            movelist: self,
+            scores: scores,
+            current: 0
+        }
+    }
+
+    pub fn lazy_iter_quiescence(&mut self, board: &Board) -> LazyMoveIter {
+        let mut scores = [0; 218];
+        for i in 0..self.length {
+            scores[i] = see_sign(board, self.moves[i]);
+        }
         LazyMoveIter {
             movelist: self,
             scores: scores,
@@ -426,10 +471,10 @@ impl MoveList {
 }
 
 pub struct LazyMoveIter<'a> {
-    movelist: &'a mut MoveList,
-    scores: [i16; 218],
-    sorted: usize,
-    current: usize,
+    pub(crate) movelist: &'a mut MoveList,
+    pub(crate) scores: [i16; 218],
+    pub(crate) sorted: usize,
+    pub(crate) current: usize,
 }
 
 impl<'a> LazyMoveIter<'a> {
@@ -443,13 +488,13 @@ impl<'a> LazyMoveIter<'a> {
 }
 
 impl<'a> Iterator for LazyMoveIter<'a> {
-    type Item = Move;
+    type Item = (Move, i16);
     fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.movelist.length {
             None
         } else if self.current < self.sorted {
             self.current += 1;
-            Some(self.movelist.moves[self.current - 1])
+            Some((self.movelist.moves[self.current - 1], self.scores[self.current - 1]))
         } else {
             let mut best = self.current;
             for i in (self.current + 1)..self.movelist.length {
@@ -465,7 +510,7 @@ impl<'a> Iterator for LazyMoveIter<'a> {
             self.scores[self.current] = tmp;
             self.current += 1;
             self.sorted = self.current;
-            Some(self.movelist.moves[self.current - 1])
+            Some((self.movelist.moves[self.current - 1], self.scores[self.current - 1]))
         }
     }
 }
