@@ -181,6 +181,53 @@
     }
     .side-btn img { width: 56px; height: 56px; }
     .side-btn:hover { background: rgba(255,255,255,0.15); border-color: #d4af37; }
+
+    /* ── Think time controls ──────────────────────────── */
+    .think-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #b0b0cc;
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .think-input {
+      width: 80px;
+      padding: 6px 8px;
+      background: #2a2a4a;
+      border: 1px solid #5a5a8a;
+      border-radius: 4px;
+      color: #d4af37;
+      font-size: 0.9rem;
+      text-align: center;
+    }
+    .think-input:focus { outline: none; border-color: #d4af37; }
+    .think-input:disabled { opacity: 0.4; }
+    .think-toggle {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .think-status {
+      color: #d4af37;
+      font-weight: 700;
+      min-width: 70px;
+      text-align: right;
+    }
+    .btn-sm {
+      background: #d4af37;
+      color: #1a1a2e;
+      border: none;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-sm:hover { background: #e8c84a; }
   </style>
 </head>
 <body>
@@ -195,6 +242,17 @@
       <div class="file-labels" id="file-labels"></div>
     </div>
     <button class="btn" onclick="newGame()">New Game</button>
+    <div class="think-row">
+      <span>Bot time:</span>
+      <input type="number" id="think-ms" class="think-input" value="500" min="50" step="50" disabled>
+      <span>ms</span>
+      <label class="think-toggle">
+        <input type="checkbox" id="think-unlimited" onchange="toggleThinkLimit()" checked>
+        No limit
+      </label>
+      <button class="btn-sm" onclick="setThinkTime()">Set</button>
+      <span class="think-status" id="think-status">∞ no limit</span>
+    </div>
   </div>
 
   <!-- Promotion modal -->
@@ -465,11 +523,43 @@
       renderBoard();
     }
 
+    // ── Think time settings ────────────────────────────
+    function toggleThinkLimit() {
+      const unlimited = document.getElementById('think-unlimited').checked;
+      document.getElementById('think-ms').disabled = unlimited;
+    }
+
+    async function setThinkTime() {
+      const unlimited = document.getElementById('think-unlimited').checked;
+      const ms = unlimited ? null : (parseInt(document.getElementById('think-ms').value) || 500);
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ think_time_ms: ms }),
+      });
+      const data = await res.json();
+      updateThinkStatus(data.think_time_ms);
+    }
+
+    function updateThinkStatus(ms) {
+      document.getElementById('think-status').textContent =
+        ms === null || ms === undefined ? '∞ no limit' : ms + ' ms';
+    }
+
     async function init() {
-      const res = await fetch('/api/state');
-      state = await res.json();
+      const [stateRes, settingsRes] = await Promise.all([
+        fetch('/api/state'),
+        fetch('/api/settings'),
+      ]);
+      state = await stateRes.json();
+      const settings = await settingsRes.json();
+      if (settings.think_time_ms !== null && settings.think_time_ms !== undefined) {
+        document.getElementById('think-unlimited').checked = false;
+        document.getElementById('think-ms').value = settings.think_time_ms;
+        document.getElementById('think-ms').disabled = false;
+      }
+      updateThinkStatus(settings.think_time_ms);
       buildCoords();
-      // Show side selection on first load
       document.getElementById('side-overlay').classList.add('show');
     }
 

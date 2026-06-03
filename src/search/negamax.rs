@@ -2,6 +2,8 @@
 Implementation of negamax, used as the main search algorithm.
 */
 
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
 use once_cell::sync::Lazy;
 
 use crate::{bitboard::{Board, Piece, Square}, eval::{PIECE_VALUE, relative_eval}, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::{Flag, LazyMoveIter, Move}}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
@@ -49,11 +51,12 @@ pub fn retrieve_score(score: i16, plies: u8) -> i16 {
     }
 }
 
-pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [[i16; 64]; 64], counter_move: &mut [[Option<Move>; 64]; 64]) -> Option<Move> {
+pub fn search(stop: &Arc<AtomicBool>, board: &mut Board, mut max_depth: u8, tt: &mut Arc<TT>, history: &mut [[i16; 64]; 64], counter_move: &mut [[Option<Move>; 64]; 64]) -> Option<Move> {
     max_depth += 1;
-    let mut state = SearchState::new_search(tt, history, counter_move);
-    let mut best_move = None;
-    let mut iteration_score = 0;
+    let original_history = history.clone();
+    let original_countermove = counter_move.clone();
+    let original_board = board.clone();
+    Arc::get_mut(tt).unwrap().new_search();
     max_depth += match board.phase {
         0 => 4,
         1..=4 => 2,
@@ -61,6 +64,82 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
         10..=13 => 0,
         _ => 0
     };
+
+    let mut helpers: Vec<_> = Vec::new();
+    for _ in 1..4 {
+        let thread_tt = Arc::clone(tt);
+        let mut thread_history = original_history.clone();
+        let mut thread_countermove = original_countermove.clone();
+        let stop = Arc::clone(stop);
+        let mut thread_board = original_board.clone();
+        let handle = std::thread::spawn(move || {
+            let mut thread_state = SearchState::new_helper(&thread_tt, &mut thread_history, &mut thread_countermove);
+            iterative_deepening(&stop, &mut thread_board, max_depth, &mut thread_state);
+        });
+        helpers.push(handle);
+    }
+
+    let main_tt = Arc::clone(tt);
+    let main_stop = Arc::clone(stop);
+    let mut main_state = SearchState::new_helper(&main_tt, history, counter_move);
+    let (best_move, _) = iterative_deepening(&main_stop, board, max_depth,  &mut main_state);
+
+    stop.store(true, Ordering::Relaxed);
+    for helper in helpers {
+        let _ = helper.join();
+    }
+
+    best_move
+
+    // let aspiration_deltas = [(DELTA_SEARCH as f32 * 1.) as i16];
+    // for depth in 1..=max_depth {
+    //     state.max_depth = depth;
+
+    //     let mut aspiration_misses = [0, 0];
+
+    //     let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - aspiration_deltas[0] };
+    //     let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + aspiration_deltas[0] };
+
+    //     loop {
+    //         let (score, mv) = negamax(stop, board, aspiration_alpha, aspiration_beta, depth, 0, false, None, &mut state);
+    //         if stop.load(Ordering::Relaxed) {
+    //             break;
+    //         }
+    //         if score <= aspiration_alpha && score.abs() <= MATE_CUTOFF {
+    //             while score <= aspiration_alpha {
+    //                 aspiration_misses[0] += 1;
+    //                 if aspiration_misses[0] < aspiration_deltas.len() {
+    //                     aspiration_alpha = iteration_score - aspiration_deltas[aspiration_misses[0]];
+    //                 } else {
+    //                     aspiration_alpha = -INF;
+    //                 }
+    //             }
+    //         } else if score >= aspiration_beta && score.abs() <= MATE_CUTOFF {
+    //             while score >= aspiration_beta {
+    //                 aspiration_misses[1] += 1;
+    //                 if aspiration_misses[1] < aspiration_deltas.len() {
+    //                     aspiration_beta = iteration_score + aspiration_deltas[aspiration_misses[1]];
+    //                 } else {
+    //                     aspiration_beta = INF;
+    //                 }
+    //             }
+    //         } else {
+    //             best_move = mv;
+    //             iteration_score = score;
+    //             if score.abs() > MATE_CUTOFF {
+    //                 return best_move
+    //             }
+    //             break;
+    //         }
+    //     }
+    // }
+    // best_move
+}
+
+pub fn iterative_deepening(stop: &Arc<AtomicBool>, board: &mut Board, max_depth: u8, state: &mut SearchState) -> (Option<Move>, i16) {
+    let mut best_move = None;
+    let mut iteration_score = 0;
+    
     let aspiration_deltas = [(DELTA_SEARCH as f32 * 1.) as i16];
     for depth in 1..=max_depth {
         state.max_depth = depth;
@@ -71,7 +150,10 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
         let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + aspiration_deltas[0] };
 
         loop {
-            let (score, mv) = negamax(board, aspiration_alpha, aspiration_beta, depth, 0, false, None, &mut state);
+            let (score, mv) = negamax(stop, board, aspiration_alpha, aspiration_beta, depth, 0, false, None, state);
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
             if score <= aspiration_alpha && score.abs() <= MATE_CUTOFF {
                 while score <= aspiration_alpha {
                     aspiration_misses[0] += 1;
@@ -94,22 +176,22 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
                 best_move = mv;
                 iteration_score = score;
                 if score.abs() > MATE_CUTOFF {
-                    return best_move
+                    return (best_move, iteration_score)
                 }
                 break;
             }
         }
     }
-    best_move
+    (best_move, iteration_score)
 }
 
-pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, quiet_moves_made: usize, state: &mut SearchState) -> i16 {
+pub fn search_move(stop: &Arc<AtomicBool>, board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, quiet_moves_made: usize, state: &mut SearchState) -> i16 {
     let mut full_search_depth = depth - 1;
     if board.in_check(board.side) && ply + depth < (state.max_depth + state.max_depth / 2) {
         full_search_depth = depth;
     }
     if i == 0 {
-        return -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state).0
+        return -negamax(stop, board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state).0
     }
 
     let mut reduced_depth_search = depth - 1;
@@ -117,21 +199,20 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
         let reduction = LMR_TABLE[depth.min(63) as usize][i.min(63) as usize];
         reduced_depth_search = depth - reduction.min(depth - 1);
     }
-    let mut score = -negamax(board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, Some(mv), state).0;
+    let mut score = -negamax(stop, board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, Some(mv), state).0;
     if score > alpha {
-        score = -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state).0;
+        score = -negamax(stop, board, -beta, -alpha, full_search_depth, ply + 1, true, Some(mv), state).0;
     } 
     score
 }
 
-pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &mut LazyMoveIter, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
+pub fn search_moves(stop: &Arc<AtomicBool>, board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &mut LazyMoveIter, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
     let is_pv_node = beta > alpha + 1;
     let mut value = -INF;
     let mut best_move = None;
     let mut moved = false;
     let mut tried_quiets = [Move::new(Flag::QUIET, Square::a2, Square::a2); 218];
     let mut tried_quiets_idx: usize = 0;
-    let captures = movelist.captures();
     let lmp = !board.in_check(board.side) && depth <= 2;
     let see_pruning = lmp && !is_pv_node;
     for (i, (mv, mv_score)) in movelist.enumerate() {
@@ -151,7 +232,7 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
         }
         moved = true;
         let score = if board.is_rule_draw() { 0 } else {
-            search_move(board, alpha, beta, depth, ply, i, mv, tried_quiets_idx, state)
+            search_move(stop, board, alpha, beta, depth, ply, i, mv, tried_quiets_idx, state)
         };
         unmake_move(board, mv, &unmake);
         if score > value {
@@ -171,12 +252,16 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
     (value, best_move, moved)
 }
 
-pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>) {
-    unsafe { NODE_COUNT += 1; }
+pub fn negamax(stop: &Arc<AtomicBool>, board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>) {
+    if unsafe { NODE_COUNT } & 0b1111111111 == 0 && stop.load(Ordering::Relaxed) {
+        return (0, None)
+    }
 
     if depth == 0 {
-        return (quiescence(board, alpha, beta, ply, state), None);
+        return (quiescence(stop, board, alpha, beta, ply, state), None);
     }
+
+    unsafe { NODE_COUNT += 1; }
 
     let is_pv_node = beta > alpha + 1;
     let mut predicted_best_move = None;
@@ -197,7 +282,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
 
     if !is_pv_node && allow_null_move && board.phase > 2 && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
-        let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state).0;
+        let null_move_score = -negamax(stop, board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state).0;
         unmake_null_move(board, &unmake);
         if null_move_score >= beta {
             let insert_score = store_score(null_move_score, ply);
@@ -207,7 +292,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     }
 
     if is_pv_node && depth >= 4 && predicted_best_move == None {
-        predicted_best_move = negamax(board, -beta, -alpha, depth / 2, ply, false, previous_move, state).1;
+        predicted_best_move = negamax(stop, board, -beta, -alpha, depth / 2, ply, false, previous_move, state).1;
     }
 
     let mut skip_quiet = false; 
@@ -225,12 +310,12 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     let mut lazy_iter = lazymovelist.lazy_iter(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
 
     let (mut value, mut best_move, mut moved)
-        = search_moves(board, alpha, beta, depth, ply, &mut lazy_iter, skip_quiet, false, previous_move, state);
+        = search_moves(stop, board, alpha, beta, depth, ply, &mut lazy_iter, skip_quiet, false, previous_move, state);
     
     if !moved && skip_quiet {
         lazy_iter.reset();
         (value, best_move, moved)
-            = search_moves(board, alpha, beta, depth, ply, &mut lazy_iter, false, true, previous_move, state);
+            = search_moves(stop, board, alpha, beta, depth, ply, &mut lazy_iter, false, true, previous_move, state);
     }
 
     if !moved {
@@ -252,7 +337,10 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     (value, best_move)
 }
 
-fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8, state: &SearchState) -> i16 {
+fn quiescence(stop: &Arc<AtomicBool>, board: &mut Board, mut alpha: i16, beta: i16, ply: u8, state: &SearchState) -> i16 {
+    if unsafe { NODE_COUNT } & 0b1111111111 == 0 && stop.load(Ordering::Relaxed) {
+        return 0
+    }
     unsafe { NODE_COUNT += 1; }
     let in_check = board.in_check(board.side);
     let stand_pat = if !in_check {
@@ -298,7 +386,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8, state: &Sea
         let score = if board.is_rule_draw() {
             0
         } else {
-            -quiescence(board, -beta, -alpha, ply+1, state)
+            -quiescence(stop, board, -beta, -alpha, ply+1, state)
         };
         unmake_move(board, mv, &unmake);
         value = i16::max(value, score);

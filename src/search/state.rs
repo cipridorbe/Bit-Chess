@@ -4,7 +4,7 @@ const MAX_HISTORY: i16 = 8192;
 
 pub struct SearchState<'a> {
     pub(crate) killers: [[Option<Move>; 2]; 48],
-    pub(crate) tt: &'a mut TT,
+    pub(crate) tt: &'a TT,
     pub(crate) history: &'a mut [[i16; 64]; 64],
     pub(crate) counter_move: &'a mut[[Option<Move>; 64]; 64],
     pub(crate) max_depth: u8
@@ -26,6 +26,16 @@ impl<'a> SearchState<'a> {
             history: history,
             counter_move: counter_move,
             max_depth: 20
+        }
+    }
+
+    pub fn new_helper(tt: &'a TT, history: &'a mut [[i16; 64]; 64], counter_move: &'a mut [[Option<Move>; 64]; 64]) -> Self {
+        SearchState {
+            killers: [[None; 2]; 48],
+            tt,
+            history,
+            counter_move,
+            max_depth: 20,
         }
     }
 
