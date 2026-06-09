@@ -1,5 +1,3 @@
-use std::mem::MaybeUninit;
-
 use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
 
 const VALUE_ABS: [i16; 12] = [
@@ -102,7 +100,7 @@ pub fn see_sign(board: &Board, initial_move: Move) -> i16 {
     
     let prom_rank = initial_move.target_square().rank() == 0 || initial_move.target_square().rank() == 7;
     occupied &= !(1 << initial_move.source_square() as u8);
-    let mut scores: [i16; 32] = unsafe { std::mem::transmute([MaybeUninit::<i16>::uninit(); 32]) };
+    let mut scores: [i16; 32] = [0; 32];
     if let Some(captured) = captured_piece {
         scores[0] = VALUE_ABS[captured as usize];
     }
@@ -110,18 +108,68 @@ pub fn see_sign(board: &Board, initial_move: Move) -> i16 {
     let mut i = 1;
     while let Some((mut attacker, bb)) = get_lva(board, initial_move.target_square(), side, occupied) {
         scores[i] = VALUE_ABS[last_moved as usize] - scores[i - 1];
-        if scores[i] > VALUE_ABS[attacker as usize] {
-            i += 1;
-            break;
-        }
         if (attacker == Piece::WhitePawn || attacker == Piece::BlackPawn) && prom_rank {
             attacker = Piece::WhiteQueen;
             scores[i] += VALUE_ABS[Piece::WhiteQueen as usize] - VALUE_ABS[Piece::WhitePawn as usize];
+        }
+        if scores[i] > VALUE_ABS[attacker as usize] {
+            i += 1;
+            break;
         }
         last_moved = attacker;
         occupied &= !(bb);
         side = side.other();
         i += 1;
+    }
+    i -= 1;
+    while i > 0 {
+        scores[i - 1] = -i16::max(-scores[i - 1], scores[i]);
+        i -= 1;
+    }
+    return scores[0];
+}
+
+/// Returns exact see score if it is non-negative. Otherwise returns negative value
+pub fn see_positive(board: &Board, initial_move: Move) -> i16 {
+    let mut occupied = board.occupied;
+    let mut last_moved = board.piece_at(initial_move.source_square()).unwrap();
+    let mut captured_piece = board.piece_at(initial_move.target_square());
+    if initial_move.flag() == Flag::ENPASSANT {
+        captured_piece = Some(Piece::WhitePawn);
+        if board.side == Side::White {
+            occupied &= !(1 << (initial_move.target_square() as u8 - 8));
+        } else {
+            occupied &= !(1 << (initial_move.target_square() as u8 +8));
+        }
+    }
+    
+    let prom_rank = initial_move.target_square().rank() == 0 || initial_move.target_square().rank() == 7;
+    occupied &= !(1 << initial_move.source_square() as u8);
+    let mut scores: [i16; 32] = [0; 32];
+    if let Some(captured) = captured_piece {
+        scores[0] = VALUE_ABS[captured as usize];
+    }
+    let mut side = board.side.other();
+    let mut i = 1;
+    let mut alpha = -scores[0];
+    let mut beta = 1;
+    while let Some((mut attacker, bb)) = get_lva(board, initial_move.target_square(), side, occupied) {
+        scores[i] = VALUE_ABS[last_moved as usize] - scores[i - 1];
+        if (attacker == Piece::WhitePawn || attacker == Piece::BlackPawn) && prom_rank {
+            attacker = Piece::WhiteQueen;
+            scores[i] += VALUE_ABS[Piece::WhiteQueen as usize] - VALUE_ABS[Piece::WhitePawn as usize];
+        }
+        beta = beta.min(scores[i]);
+        i += 1;
+        if alpha >= beta {
+            break;
+        }
+        last_moved = attacker;
+        occupied &= !(bb);
+        side = side.other();
+        let tmp = alpha;
+        alpha = -beta;
+        beta = -tmp;
     }
     i -= 1;
     while i > 0 {
@@ -434,6 +482,22 @@ mod tests {
             assert_eq!(
                 result.signum(),
                 test.expected.signum(),
+                "see_sign failed:\nFEN: {}\nMove: {}\nExpected sign: {}\nGot: {}",
+                test.fen, test.mv, test.expected.signum(), result
+            );
+        }
+    }
+
+    #[test]
+    fn test_see_positive_suite() {
+        for test in SEE_TESTS {
+            println!("{}", test.fen);
+            let board = Board::from_fen(test.fen);
+            let mv = Move::from_uci(&board, test.mv);
+            let result = see_positive(&board, mv);
+            assert_eq!(
+                if result >= 0 { result } else { -1 },
+                if test.expected >= 0 { test.expected } else { -1 },
                 "see_sign failed:\nFEN: {}\nMove: {}\nExpected sign: {}\nGot: {}",
                 test.fen, test.mv, test.expected.signum(), result
             );

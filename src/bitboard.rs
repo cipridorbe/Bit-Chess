@@ -371,7 +371,7 @@ impl Board {
 
     /// Returns if the game drew by repetion or by 50-move rule or insufficient material
     pub fn is_rule_draw(&self) -> bool {
-        if self.halfmoves >= 50 || self.repetitions >= 3 {
+        if self.halfmoves >= 100 || self.repetitions >= 3 {
             return true;
         }
         if self.phase == 1 && self.occupied.count_ones() == 3 {

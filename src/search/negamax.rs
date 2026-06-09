@@ -61,18 +61,35 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
         10..=13 => 0,
         _ => 0
     };
+    let aspiration_deltas = [(DELTA_SEARCH as f32 * 1.) as i16];
     for depth in 1..=max_depth {
         state.max_depth = depth;
 
-        let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - DELTA_SEARCH };
-        let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + DELTA_SEARCH };
+        let mut aspiration_misses = [0, 0];
+
+        let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - aspiration_deltas[0] };
+        let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + aspiration_deltas[0] };
 
         loop {
             let (score, mv) = negamax(board, aspiration_alpha, aspiration_beta, depth, 0, false, None, &mut state);
-            if score <= aspiration_alpha && score <= MATE_CUTOFF {
-                aspiration_alpha = -INF;
-            } else if score >= aspiration_beta && score <= MATE_CUTOFF {
-                aspiration_beta = INF;
+            if score <= aspiration_alpha && score.abs() <= MATE_CUTOFF {
+                while score <= aspiration_alpha {
+                    aspiration_misses[0] += 1;
+                    if aspiration_misses[0] < aspiration_deltas.len() {
+                        aspiration_alpha = iteration_score - aspiration_deltas[aspiration_misses[0]];
+                    } else {
+                        aspiration_alpha = -INF;
+                    }
+                }
+            } else if score >= aspiration_beta && score.abs() <= MATE_CUTOFF {
+                while score >= aspiration_beta {
+                    aspiration_misses[1] += 1;
+                    if aspiration_misses[1] < aspiration_deltas.len() {
+                        aspiration_beta = iteration_score + aspiration_deltas[aspiration_misses[1]];
+                    } else {
+                        aspiration_beta = INF;
+                    }
+                }
             } else {
                 best_move = mv;
                 iteration_score = score;
@@ -86,7 +103,7 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
     best_move
 }
 
-pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, captures: usize, state: &mut SearchState) -> i16 {
+pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, quiet_moves_made: usize, state: &mut SearchState) -> i16 {
     let mut full_search_depth = depth - 1;
     if board.in_check(board.side) && ply + depth < (state.max_depth + state.max_depth / 2) {
         full_search_depth = depth;
@@ -96,7 +113,7 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
     }
 
     let mut reduced_depth_search = depth - 1;
-    if i > captures + 3 && depth >= 3 && !mv.is_promotion() && ply > 1 && !board.in_check(board.side) {
+    if quiet_moves_made > 3 && depth >= 3 && !mv.is_queen_promotion() && ply > 1 && !board.in_check(board.side) {
         let reduction = LMR_TABLE[depth.min(63) as usize][i.min(63) as usize];
         reduced_depth_search = depth - reduction.min(depth - 1);
     }
@@ -108,15 +125,24 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
 }
 
 pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &mut LazyMoveIter, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
+    let is_pv_node = beta > alpha + 1;
     let mut value = -INF;
     let mut best_move = None;
     let mut moved = false;
     let mut tried_quiets = [Move::new(Flag::QUIET, Square::a2, Square::a2); 218];
-    let mut tried_quiets_idx = 0;
+    let mut tried_quiets_idx: usize = 0;
     let captures = movelist.captures();
-    for (i, mv) in movelist.enumerate() {
+    let lmp = !board.in_check(board.side) && depth <= 2;
+    let see_pruning = lmp && !is_pv_node;
+    for (i, (mv, mv_score)) in movelist.enumerate() {
         if skip_tried && (i == 0 || mv.is_capture()) {
             continue;
+        }
+        if lmp && !mv.is_capture() && !mv.is_queen_promotion() && moved && tried_quiets_idx as u8 >= 2 + depth * depth {
+            continue;
+        }
+        if see_pruning && mv.is_capture() && Move::see_negative_score(mv_score) < -1 - depth as i16 && moved {
+            break;
         }
         let unmake = make_move(board, mv);
         if board.in_check(board.side.other()) || (skip_quiet && i != 0 && !mv.is_capture() && !board.in_check(board.side)) {
@@ -125,7 +151,7 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
         }
         moved = true;
         let score = if board.is_rule_draw() { 0 } else {
-            search_move(board, alpha, beta, depth, ply, i, mv, captures, state)
+            search_move(board, alpha, beta, depth, ply, i, mv, tried_quiets_idx, state)
         };
         unmake_move(board, mv, &unmake);
         if score > value {
@@ -149,7 +175,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     unsafe { NODE_COUNT += 1; }
 
     if depth == 0 {
-        return (quiescence(board, alpha, beta, ply), None);
+        return (quiescence(board, alpha, beta, ply, state), None);
     }
 
     let is_pv_node = beta > alpha + 1;
@@ -226,7 +252,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     (value, best_move)
 }
 
-fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
+fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8, state: &SearchState) -> i16 {
     unsafe { NODE_COUNT += 1; }
     let in_check = board.in_check(board.side);
     let stand_pat = if !in_check {
@@ -272,7 +298,7 @@ fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
         let score = if board.is_rule_draw() {
             0
         } else {
-            -quiescence(board, -beta, -alpha, ply+1)
+            -quiescence(board, -beta, -alpha, ply+1, state)
         };
         unmake_move(board, mv, &unmake);
         value = i16::max(value, score);
