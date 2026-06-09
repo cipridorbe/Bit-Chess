@@ -1,6 +1,6 @@
 /*
  Contains tables used to quickly access/calculate attack bitboards for 
- different pieces
+ individual, different pieces
 */
 
 use once_cell::sync::Lazy;
