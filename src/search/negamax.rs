@@ -2,12 +2,13 @@
 Implementation of negamax, used as the main search algorithm.
 */
 
-use crate::{bitboard::{Board}, eval::relative_eval, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::Move}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
+use crate::{bitboard::Board, eval::relative_eval, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::{Move, MoveList}}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
 const MATE_CUTOFF: i16 = 29000;
 pub const INF: i16 = 31000;
 const DELTA_SEARCH: i16 = 50;
+const FUTILITY_MARGIN: i16 = 150;
 
 pub static mut NODE_COUNT: u64 = 0;
 
@@ -66,18 +67,72 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
                     break;
                 }
             }
-            if best_score <= aspiration_alpha {
+            if best_score <= aspiration_alpha && best_score <= MATE_CUTOFF {
                 aspiration_alpha = -INF;
-            } else if best_score >= aspiration_beta {
+            } else if best_score >= aspiration_beta && best_score <= MATE_CUTOFF {
                 aspiration_beta = INF;
             } else {
                 state.tt.insert(TTEntry::new(board.hash, depth, best_score, TTFlag::Exact, best_move, board.fullmoves, state.tt.generation));
                 iteration_score = best_score;
+                if best_score > MATE_CUTOFF {
+                    return best_move
+                }
                 break;
             }
         }
     }
     best_move
+}
+
+pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8, i: usize, mv: Move, captures: usize, state: &mut SearchState) -> i16 {
+    let mut full_search_depth = depth - 1;
+    if board.in_check(board.side) && ply < 2 * state.max_depth {
+        full_search_depth = depth;
+    }
+    if i == 0 {
+        return -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, state)
+    }
+
+    let mut reduced_depth_search = depth - 1;
+    if i > captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
+        reduced_depth_search = depth - 2;
+    }
+    let mut score = -negamax(board, -alpha-1, -alpha, reduced_depth_search, ply + 1, true, state);
+    if score > alpha || score.abs() > MATE_CUTOFF {
+        score = -negamax(board, -beta, -alpha, full_search_depth, ply + 1, true, state);
+    } 
+    score
+}
+
+pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &MoveList, skip_quiet: bool, skip_tried: bool, state: &mut SearchState) -> (i16, Option<Move>, bool) {
+    let mut value = -INF;
+    let mut best_move = None;
+    let mut moved = false;
+    for (i, mv) in movelist.iter().enumerate() {
+        if skip_tried && (i == 0 || mv.is_capture()) {
+            continue;
+        }
+        let unmake = make_move(board, mv);
+        if board.in_check(board.side.other()) || (skip_quiet && i != 0 && !mv.is_capture() && !board.in_check(board.side)) {
+            unmake_move(board, mv, &unmake);
+            continue;
+        }
+        moved = true;
+        let score = if board.is_rule_draw() { 0 } else {
+            search_move(board, alpha, beta, depth, ply, i, mv, movelist.captures, state)
+        };
+        unmake_move(board, mv, &unmake);
+        if score > value {
+            value = score;
+            best_move = Some(mv);
+        }
+        alpha = i16::max(alpha, score);
+        if alpha >= beta {
+            state.beta_cutoff(mv, depth, ply);
+            break;
+        }
+    }
+    (value, best_move, moved)
 }
 
 pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply: u8, allow_null_move: bool, state: &mut SearchState) -> i16 {
@@ -100,7 +155,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         return quiescence(board, alpha, beta, ply);
     }
 
-    if  allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
+    if allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
         let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, state);
         unmake_null_move(board, &unmake);
@@ -111,70 +166,111 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         }
     }
 
+    let original_alpha = alpha;
+    let skip_quiet = depth == 1 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN < alpha;
     let mut movelist = generate_movelist(board, false);
     movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history);
-    let mut value = -INF;
-    let mut moved = false;
-    let original_alpha = alpha;
-    let mut best_move = None;
-    for (i, mv) in movelist.iter().enumerate() {
-        let unmake = make_move(board, mv);
-        if board.in_check(board.side.other()) {
-            unmake_move(board, mv, &unmake);
-            continue;
-        }
-        moved = true;
-        let score = if board.is_rule_draw() {
-            0
-        } else if i != 0 {
-            let search_depth = depth - if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
-                2
-            } else {
-                1
-            };
-            let low_score = -negamax(board, -alpha-1, -alpha, search_depth, ply + 1, true, state);
-            if low_score > alpha || low_score.abs() > MATE_CUTOFF {
-                let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
-                -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
-            } else {
-                low_score
-            }
-        } else {
-            let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
-            -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
-        };
-        unmake_move(board, mv, &unmake);
-        if score > value {
-            best_move = Some(mv);
-            value = score;
-        }
-        alpha = i16::max(alpha, value);
-        if alpha >= beta {
-            state.beta_cutoff(mv, depth, ply);
-            break;
-        }
+
+    let (mut value, mut best_move, mut moved)
+        = search_moves(board, alpha, beta, depth, ply, &movelist, skip_quiet, false, state);
+    
+    if !moved && skip_quiet {
+        (value, best_move, moved)
+            = search_moves(board, alpha, beta, depth, ply, &movelist, false, true, state);
     }
 
     if !moved {
-        if board.in_check(board.side) {
-            return -(MATE_VAL - ply as i16);
+        return if board.in_check(board.side) {
+            -(MATE_VAL - ply as i16)
         } else {
-            return 0;
-        }
+            0
+        };
     }
 
-    let flag = if original_alpha < value && value < beta {
-        TTFlag::Exact
-    } else if value >= beta {
-        TTFlag::Lower
-    } else {
-        TTFlag::Upper
-    };
+    let ttflag = 
+        if value >= beta { TTFlag::Lower }
+        else if value <= original_alpha { TTFlag::Upper }
+        else { TTFlag::Exact };
     if board.repetitions <= 1 {
         let store_score = store_score(value, ply);
-        state.tt.insert(TTEntry::new(board.hash, depth, store_score, flag, best_move, board.fullmoves, state.tt.generation));
+        state.tt.insert(TTEntry::new(board.hash, depth, store_score, ttflag, best_move, board.fullmoves, state.tt.generation));
     }
-    value
+    return value;
+
+
+    // loop {    
+    //     let mut value = -INF;
+    //     let mut moved = false;
+    //     let original_alpha = alpha;
+    //     let mut best_move = None;
+    //     for (i, mv) in movelist.iter().enumerate() {
+    //         if futility_prune_failed && (i == 0 || mv.is_capture()) {
+    //             continue;
+    //         }
+    //         let unmake = make_move(board, mv);
+    //         if board.in_check(board.side.other()) || (futility_prune && i != 0 && !mv.is_capture() && !board.in_check(board.side)) {
+    //             unmake_move(board, mv, &unmake);
+    //             continue;
+    //         }
+    //         moved = true;
+    //         let score = if board.is_rule_draw() {
+    //             0
+    //         } else if i != 0 {
+    //             let search_depth = depth - if i > movelist.captures + 7 && depth >= 3 && !mv.is_promotion() && !board.in_check(board.side) {
+    //                 2
+    //             } else {
+    //                 1
+    //             };
+    //             let low_score = -negamax(board, -alpha-1, -alpha, search_depth, ply + 1, true, state);
+    //             if low_score > alpha || low_score.abs() > MATE_CUTOFF {
+    //                 let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
+    //                 -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
+    //             } else {
+    //                 low_score
+    //             }
+    //         } else {
+    //             let new_depth = if board.in_check(board.side) && ply < 2 * state.max_depth { depth } else { depth - 1 };
+    //             -negamax(board, -beta, -alpha, new_depth, ply + 1, true, state)
+    //         };
+    //         unmake_move(board, mv, &unmake);
+    //         if score > value {
+    //             best_move = Some(mv);
+    //             value = score;
+    //         }
+    //         alpha = i16::max(alpha, value);
+    //         if alpha >= beta {
+    //             state.beta_cutoff(mv, depth, ply);
+    //             break;
+    //         }
+    //     }
+
+    //     if !moved && futility_prune {
+    //         futility_prune = false;
+    //         futility_prune_failed = true;
+    //         continue;
+    //     }
+
+    //     if !moved {
+    //         if board.in_check(board.side) {
+    //             return -(MATE_VAL - ply as i16);
+    //         } else {
+    //             return 0;
+    //         }
+    //     }
+
+    //     let flag = if original_alpha < value && value < beta {
+    //         TTFlag::Exact
+    //     } else if value >= beta {
+    //         TTFlag::Lower
+    //     } else {
+    //         TTFlag::Upper
+    //     };
+    //     if board.repetitions <= 1 {
+    //         let store_score = store_score(value, ply);
+    //         state.tt.insert(TTEntry::new(board.hash, depth, store_score, flag, best_move, board.fullmoves, state.tt.generation));
+    //     }
+    //     return value;
+    // }
 }
 
 fn quiescence(board: &mut Board, mut alpha: i16, beta: i16, ply: u8) -> i16 {
