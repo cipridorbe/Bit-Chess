@@ -18,7 +18,7 @@ Square representation of bitboard.
 Note that rank and files are both 0-indexed.
 */
 
-use crate::{eval::eval, movegen::r#move::Move, util::squares};
+use crate::{eval::eval, movegen::{attacks::{all_attacks, is_in_check}, r#move::Move}, util::squares};
 
 /// Square indices on bitboards.
 /// For example 1 << Square::a1 is the mask for the a1 square. 
@@ -305,7 +305,7 @@ pub struct Board {
     pub(crate) score: i16,
 
     /// The number of times the current move appears in the search history
-    pub(crate) repetitions: u8
+    pub(crate) repetitions: u8,
 }
 
 impl Board {
@@ -378,6 +378,12 @@ impl Board {
             }
         }
         out
+    }
+
+    // Returns true if the king of the current side is in check
+    pub fn in_check(&self) -> bool {
+        let attacks = all_attacks(&self, self.side.other());
+        attacks & self.pieces[Piece::king(self.side) as usize] != 0
     }
 
     fn format_board(&self, piece_fn: impl Fn(Piece) -> String, empty: char) -> String {
@@ -536,9 +542,16 @@ impl Board {
         let mut history = HashHistory::new();
         history.hashes.push(hash);
 
-        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1 };
+        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1};
         b.score = eval(&b);
         b
+    }
+
+    // Returns true if the current move has non pawn pieces left
+    pub fn has_non_pawn_pieces(&self) -> bool {
+        let pawn = Piece::pawn(self.side);
+        let king = Piece::king(self.side);
+        self.sides[self.side as usize] & !(self.pieces[pawn as usize] | self.pieces[king as usize]) != 0
     }
 }
 

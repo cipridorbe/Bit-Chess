@@ -149,7 +149,7 @@ mod tests {
     fn node_count() {
         use crate::search::negamax::NODE_COUNT;
         use crate::movegen::makemove::make_move;
-        let depth = 7;
+        let depth = 8;
         let iters = 7;
         // let mut tt = TT::new_disabled();
         let mut tt = TT::new(22, 2);

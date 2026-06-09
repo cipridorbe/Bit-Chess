@@ -2,6 +2,27 @@
 
 use crate::bitboard::Square;
 
+/// If a file has a 1, the entire file is marked with a 1
+pub fn populate_files(bb: u64) -> u64 {
+    populate_files_up(bb) | populate_files_down(bb)
+}
+
+/// Populates files only on higher ranks
+pub fn populate_files_up(mut bb: u64) -> u64 {
+    bb |= bb << 8;
+    bb |= bb << 16;
+    bb |= bb << 32;
+    bb
+}
+
+/// Populates files only going down
+pub fn populate_files_down(mut bb: u64) -> u64 {
+    bb |= bb >> 8;
+    bb |= bb >> 16;
+    bb |= bb >> 32;
+    bb
+}
+
 /// Returns the given number, only keeping the least significant bit
 #[inline]
 pub fn lsb(number: u64) -> u64 {

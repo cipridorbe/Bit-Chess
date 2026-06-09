@@ -8,9 +8,9 @@ STOCKFISH="/c/Program Files/stockfish/stockfish-windows-x86-64-avx2.exe"
 GAMES=50
 
 # ── Engine settings ────────────────────────────────────────────────────────────
-BITCHESS_DEPTH=7
+BITCHESS_DEPTH=8
 STOCKFISH_DEPTH=15
-STOCKFISH_ELO=2000   # min 1320, max 3190
+STOCKFISH_ELO=2150   # min 1320, max 3190
 
 # ── Args: [-n name] [-d description] ─────────────────────────────────────────
 NAME=""

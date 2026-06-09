@@ -216,9 +216,9 @@ impl Move {
 /// is the maximum number of legal moves in a given position.
 #[derive(Clone)]
 pub struct MoveList {
-    moves: [Move; 218],
-    length: usize,
-    captures: usize,
+    pub(crate) moves: [Move; 218],
+    pub(crate) length: usize,
+    pub(crate) captures: usize,
 }
 
 impl MoveList {
@@ -227,7 +227,7 @@ impl MoveList {
         MoveList {
             moves: unsafe { std::mem::transmute([u16::MAX; 218]) },
             length: 0,
-            captures: 0
+            captures: 0,
         }
     }
 
