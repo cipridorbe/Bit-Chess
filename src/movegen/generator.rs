@@ -41,7 +41,7 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
         check_segment = SEGMENT[checker as usize][board[Piece::king(colour)].lsb() as usize];
     }
     generate_castling_movelist(&mut movelist, board, captures_only);
-    generate_pawn_movelist(&mut movelist, board);
+    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only);
     generate_piece_movelist(&mut movelist,
         board[Piece::knight(colour)],
         single_knight_attacks,
@@ -123,35 +123,41 @@ fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: S
     }
 }
 
-fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
+fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, captures_only: bool) {
     let colour = board.colour;
     let pawns = board[Piece::pawn(colour)];
     match colour {
         Colour::White => {
             let attacks_left = (pawns & !Board::A_FILE) << 7;
-            add_pawn_moves(movelist, attacks_left & board[!colour], 7, Flag::CAPTURE);
+            add_pawn_moves(movelist, attacks_left & board[!colour] & !avoid, 7, Flag::CAPTURE);
             let attacks_right = (pawns & !Board::H_FILE) << 9;
-            add_pawn_moves(movelist, attacks_right & board[!colour], 9, Flag::CAPTURE);
-            let push = pawns << 8;
-            add_pawn_moves(movelist, push & !board.occupied(), 8, Flag::QUIET);
-            let double_push = (push & Board::RANK_3 & !board.occupied()) << 8;
-            add_pawn_moves(movelist, double_push & !board.occupied(), 16, Flag::PAWNPUSH);
+            add_pawn_moves(movelist, attacks_right & board[!colour] & !avoid, 9, Flag::CAPTURE);
+            if !captures_only {
+                let push = pawns << 8;
+                add_pawn_moves(movelist, push & !board.occupied() & !avoid, 8, Flag::QUIET);
+                let double_push = (push & Board::RANK_3 & !board.occupied()) << 8;
+                add_pawn_moves(movelist, double_push & !board.occupied() & !avoid, 16, Flag::PAWNPUSH);
+            }
         },
         Colour::Black => {
             let attacks_left = (pawns & !Board::A_FILE) >> 9;
-            add_pawn_moves(movelist, attacks_left & board[!colour], -9, Flag::CAPTURE);
+            add_pawn_moves(movelist, attacks_left & board[!colour] & !avoid, -9, Flag::CAPTURE);
             let attacks_right = (pawns & !Board::H_FILE) >> 7;
-            add_pawn_moves(movelist, attacks_right & board[!colour], -7, Flag::CAPTURE);
-            let push = pawns >> 8;
-            add_pawn_moves(movelist, push & !board.occupied(), -8, Flag::QUIET);
-            let double_push = (push & Board::RANK_6 & !board.occupied()) >> 8;
-            add_pawn_moves(movelist, double_push & !board.occupied(), -16, Flag::PAWNPUSH);
+            add_pawn_moves(movelist, attacks_right & board[!colour] & !avoid, -7, Flag::CAPTURE);
+            if !captures_only {
+                let push = pawns >> 8;
+                add_pawn_moves(movelist, push & !board.occupied() & !avoid, -8, Flag::QUIET);
+                let double_push = (push & Board::RANK_6 & !board.occupied()) >> 8;
+                add_pawn_moves(movelist, double_push & !board.occupied() & !avoid, -16, Flag::PAWNPUSH);
+            }
         },
     }
 
-    if let Some(enp_square) = board.enpassant {
-        for pawn in BB::squares(pawn_attacks(enp_square.bb(), !colour) & pawns) {
-            movelist.add(Move::new(Flag::ENPASSANT, enp_square, pawn));
+    if let Some(enp_square) = board.enpassant {       
+        if enp_square.bb() & !avoid != 0 {
+            for pawn in BB::squares(pawn_attacks(enp_square.bb(), !colour) & pawns) {
+                movelist.add(Move::new(Flag::ENPASSANT, enp_square, pawn));
+            }
         }
     }
 }

@@ -1,3 +1,5 @@
+#![allow(long_running_const_eval)]
+
 pub mod eval;
 pub mod movegen;
 pub mod repr;

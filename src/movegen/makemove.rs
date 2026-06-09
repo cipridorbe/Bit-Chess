@@ -7,6 +7,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     let colour = board.colour;
     let piece = board[mv.source_square()].unwrap();
     let mut final_piece = piece;
+    let mut final_square = mv.target_square();
     let mut captured = board[mv.target_square()];
     let original_occupancy = board.occupied();
     
@@ -94,6 +95,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
         },
         Flag::KINGCASTLE => {
             let rook = Piece::rook(colour);
+            final_piece = rook;
             let (source, target) = match colour {
                 Colour::White => {
                     board.castling_rights.unset_white_king();
@@ -104,6 +106,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
                     (Square::h8, Square::f8)
                 }
             };
+            final_square = target;
             board[rook] &= !source.bb();
             board[rook] |= target.bb();
             board[source] = None;
@@ -114,6 +117,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
         },
         Flag::QUEENCASTLE => {
             let rook = Piece::rook(colour);
+            final_piece = rook;
             let (source, target) = match colour {
                 Colour::White => {
                     board.castling_rights.unset_white_queen();
@@ -124,6 +128,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
                     (Square::a8, Square::d8)
                 }
             };
+            final_square = target;
             board[rook] &= !source.bb();
             board[rook] |= target.bb();
             board[source] = None;
@@ -148,6 +153,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     }
 
     let diff = original_occupancy ^ board.occupied();
+
 
     match piece.piece_type() {
         PieceType::Slider => board.state.attacks[colour as usize][PieceType::Slider as usize] = board.calculate_attacks(colour, PieceType::Slider),
@@ -184,23 +190,23 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
             Piece::WhitePawn | Piece::BlackPawn => pawn_attacks(mv.target_square().bb(), colour) & king != 0,
             Piece::WhiteKnight | Piece::BlackKnight => single_knight_attacks(mv.target_square()) & king != 0,
             Piece::WhiteBishop | Piece::BlackBishop => SEGMENT_DIAGONAL[mv.target_square() as usize][king.lsb() as usize] & board.occupied() == mv.target_square().bb(),
-            Piece::WhiteRook | Piece::BlackRook => SEGMENT_CARDINAL[mv.target_square() as usize][king.lsb() as usize] & board.occupied() == mv.target_square().bb(),
+            Piece::WhiteRook | Piece::BlackRook => SEGMENT_CARDINAL[final_square as usize][king.lsb() as usize] & board.occupied() == final_square.bb(),
             Piece::WhiteQueen | Piece::BlackQueen => SEGMENT[mv.target_square() as usize][king.lsb() as usize] & board.occupied() == mv.target_square().bb(),
         };
         if moved_checks {
-            board.state.checkers |= mv.target_square();
+            board.state.checkers |= final_square;
         }
         if SEGMENT[mv.source_square() as usize][king.lsb() as usize] != 0 {
             let bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied());
             if bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]) != 0 {
-                board.state.checkers |= bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)])
-            } else {
-                let rook_attacks = single_rook_attacks(king.lsb(), board.occupied());
-                if rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)]) != 0 {
-                    board.state.checkers |= rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)])
-                }
+                board.state.checkers |= bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]);
+            }
+            let rook_attacks = single_rook_attacks(king.lsb(), board.occupied());
+            if rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)]) != 0 {
+                board.state.checkers |= rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)]);
             }
         }
+        test_assert!(board.state.checkers != 0);
     }
 
     board.colour = !colour;
@@ -286,6 +292,58 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
     board.colour = !colour;
 }
 
+fn is_legal(board: &Board, mv: Move) -> bool {
+    let colour = board.colour;
+    let piece = board[mv.source_square()].unwrap();
+    if piece == Piece::WhiteKing || piece == Piece::BlackKing {
+        return true;
+    }
+    let king = board[Piece::king(colour)];
+    if mv.flag() != Flag::ENPASSANT {
+        if SEGMENT[king.lsb() as usize][mv.source_square() as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & mv.source_square().bb() == 0 {
+            return true;
+        }
+        let new_occupied = board.occupied() & !mv.source_square().bb() | mv.target_square();
+        let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
+            return false;
+        }
+        let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+        if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+            return false;
+        }
+        return true;
+    } else {
+        let captured_square = match colour {
+            Colour::White => Square::from_u8(mv.target_square() as u8 - 8),
+            Colour::Black => Square::from_u8(mv.target_square() as u8 + 8),
+        };
+        let new_occupied = (board.occupied() & !mv.source_square().bb() & !captured_square.bb()) | mv.target_square();
+        if SEGMENT[king.lsb() as usize][mv.source_square() as usize] != 0 && board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) != 0 {
+            let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+            if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
+                return false;
+            }
+            let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+            if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+                return false;
+            }
+        }
+        if SEGMENT[king.lsb() as usize][captured_square as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) == 0 {
+            return true;
+        }
+        let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
+            return false;
+        }
+        let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+        if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+            return false;
+        }
+        return true;
+    }
+}
+
 impl Board {
     pub fn makemove(&mut self, mv: Move) -> UnmakeInfo {
         makemove(self, mv)
@@ -293,6 +351,10 @@ impl Board {
 
     pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: &mut MoveList) {
         unmakemove(self, mv, mv_score, unmake_info, movelist);
+    }
+
+    pub fn is_legal(&self, mv: Move) -> bool {
+        is_legal(self, mv)
     }
 }
 

@@ -3,4 +3,5 @@ pub mod generator;
 pub mod makemove;
 pub mod r#move;
 pub mod perft;
+pub mod pext;
 pub mod tables;

@@ -1,4 +1,6 @@
-use crate::{movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, KING_ATTACKS, KNIGHT_ATTACKS, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::Square}};
+#[cfg(not(target_feature = "bmi2"))]
+use crate::movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK};
+use crate::{movegen::tables::{KING_ATTACKS, KNIGHT_ATTACKS}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::Square}};
 
 /// Bitboard of pawn attacks of the given colour
 pub fn pawn_attacks(pawns: BB, colour: Colour) -> BB {
@@ -46,16 +48,34 @@ pub fn single_king_attacks(king: Square) -> BB {
 
 /// Bitboard of squares attacked by a rook with the given occupancy
 pub fn single_rook_attacks(rook: Square, occupied: BB) -> BB {
-    let blockers = ROOK_MASK[rook as usize] & occupied;
-    let idx = ROOK_MAGIC[rook as usize].wrapping_mul(blockers.0);
-    ROOK_ATTACKS[rook as usize][(idx >> (64 - ROOK_BITS[rook as usize])) as usize]
+    #[cfg(not(target_feature = "bmi2"))] {
+        let blockers = ROOK_MASK[rook as usize] & occupied;
+        let idx = ROOK_MAGIC[rook as usize].wrapping_mul(blockers.0);
+        ROOK_ATTACKS[rook as usize][(idx >> (64 - ROOK_BITS[rook as usize])) as usize]
+    }
+    #[cfg(target_feature = "bmi2")] {
+        use crate::movegen::pext::{ROOK_ATTACKS_FLAT, ROOK_BLOCKER_MASKS, ROOK_OFFSETS, ROOK_POST_MASKS, pext_index};
+        let sq = rook as usize;
+        let idx = pext_index(occupied, BB::new(ROOK_BLOCKER_MASKS[sq]));
+        let compressed = ROOK_ATTACKS_FLAT[ROOK_OFFSETS[sq] as usize + idx];
+        BB::new(unsafe { std::arch::x86_64::_pdep_u64(compressed as u64, ROOK_POST_MASKS[sq]) })
+    }
 }
 
 /// Bitboard of squares attacked by a bishop with the given occupancy
 pub fn single_bishop_attacks(bishop: Square, occupied: BB) -> BB {
-    let blockers = BISHOP_MASK[bishop as usize] & occupied;
-    let idx = BISHOP_MAGIC[bishop as usize].wrapping_mul(blockers.0);
-    BISHOP_ATTACKS[bishop as usize][(idx >> (64 - BISHOP_BITS[bishop as usize])) as usize]
+    #[cfg(not(target_feature = "bmi2"))] {
+        let blockers = BISHOP_MASK[bishop as usize] & occupied;
+        let idx = BISHOP_MAGIC[bishop as usize].wrapping_mul(blockers.0);
+        BISHOP_ATTACKS[bishop as usize][(idx >> (64 - BISHOP_BITS[bishop as usize])) as usize]
+    }
+    #[cfg(target_feature = "bmi2")] {
+        use crate::movegen::pext::{BISHOP_ATTACKS_FLAT, BISHOP_BLOCKER_MASKS, BISHOP_OFFSETS, BISHOP_POST_MASKS, pext_index};
+        let sq = bishop as usize;
+        let idx = pext_index(occupied, BB::new(BISHOP_BLOCKER_MASKS[sq]));
+        let compressed = BISHOP_ATTACKS_FLAT[BISHOP_OFFSETS[sq] as usize + idx];
+        BB::new(unsafe { std::arch::x86_64::_pdep_u64(compressed as u64, BISHOP_POST_MASKS[sq]) })
+    }
 }
 
 /// Bitboard of squares attacked by a queen with the given occupancy
@@ -105,14 +125,14 @@ impl Board {
                 | king_attacks(self[Piece::BlackKing])
             },
             (Colour::White, PieceType::Slider) => {
-                rook_attacks(self[Piece::WhiteRook], self.occupied())
-                | bishop_attacks(self[Piece::WhiteBishop], self.occupied())
-                | queen_attacks(self[Piece::WhiteQueen], self.occupied())
+                rook_attacks(self[Piece::WhiteRook], self.occupied() & !self[Piece::BlackKing])
+                | bishop_attacks(self[Piece::WhiteBishop], self.occupied() & !self[Piece::BlackKing])
+                | queen_attacks(self[Piece::WhiteQueen], self.occupied() & !self[Piece::BlackKing])
             },
             (Colour::Black, PieceType::Slider) => {
-                rook_attacks(self[Piece::BlackRook], self.occupied())
-                | bishop_attacks(self[Piece::BlackBishop], self.occupied())
-                | queen_attacks(self[Piece::BlackQueen], self.occupied())
+                rook_attacks(self[Piece::BlackRook], self.occupied() & !self[Piece::WhiteKing])
+                | bishop_attacks(self[Piece::BlackBishop], self.occupied() & !self[Piece::WhiteKing])
+                | queen_attacks(self[Piece::BlackQueen], self.occupied() & !self[Piece::WhiteKing])
             },
         }
     }

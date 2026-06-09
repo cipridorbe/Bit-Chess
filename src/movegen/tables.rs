@@ -272,8 +272,7 @@ pub const BISHOP_MAGIC: [u64; 64] = [
 /// Returns the bitboards of squares a rook can attack from a given square,
 /// given the occupancy of the other pieces. Used only to calculate magic 
 /// numbers
-#[allow(dead_code)]
-fn rook_attacks_with_occupancy(square: Square, occupancy: BB) -> BB {
+pub fn rook_attacks_with_occupancy(square: Square, occupancy: BB) -> BB {
     let mut attacks = BB::new(0);
     let (rank, file) = square.rank_file();
     // Attack upwards
@@ -314,8 +313,7 @@ fn rook_attacks_with_occupancy(square: Square, occupancy: BB) -> BB {
 /// Returns the bitboards of squares a bishop can attack from a given square,
 /// given the occupancy of the other pieces. Used only to calculate magic 
 /// numbers
-#[allow(dead_code)]
-fn bishop_attacks_with_occupancy(square: Square, occupancy: BB) -> BB {
+pub fn bishop_attacks_with_occupancy(square: Square, occupancy: BB) -> BB {
     let mut attacks = BB::new(0);
     let (rank, file) = square.rank_file();
     // Attack up and right
@@ -464,7 +462,7 @@ fn compute_bishop_magics() -> [u64; 64] {
 /// Returns a vector containing all subsets of a given mask. Used for magic
 /// table creation.
 /// For example 0101 -> [0000, 0001, 0100, 0101]
-fn mask_subsets(mask: BB) -> Vec<BB> {
+pub fn mask_subsets(mask: BB) -> Vec<BB> {
     let mut bit_indices = Vec::new();
     for i in 0..64 {
         if mask.0 & (1 << i) != 0 {
