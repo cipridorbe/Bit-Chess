@@ -66,7 +66,7 @@ fn main() {
                         i += 1;
                     }
                 }
-                match search(&board, depth) {
+                match search(&mut board, depth) {
                     Some(mv) => print!("bestmove {}\n", mv.to_uci()),
                     None => print!("bestmove 0000\n"),
                 }

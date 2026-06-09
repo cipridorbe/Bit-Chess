@@ -1,8 +1,7 @@
 /*
-  Moves are encoded in a u32 as follows
-  [ 0s ][ flags ][ piece moved ][ target square ][ source square ]
+  Moves are encoded in a u16 as follows
+  [ flags ][ target square ][ source square ]
   source/target square: 6 bits, corresponds to `Square`
-  piece moved: 4 bits, corresponds to `Piece`
   flags: 4 bits as follows
   0 1 0 0  Capture
   1 0 0 0  Promotion
@@ -49,28 +48,25 @@ impl Flag {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Move(u32);
+pub struct Move(u16);
 
 impl Move {
     pub const SOURCE_OFFSET: u8 = 0;
     pub const TARGET_OFFSET: u8 = 6;
-    pub const PIECE_OFFSET: u8 = 12;
-    pub const FLAG_OFFSET: u8 = 16;
+    pub const FLAG_OFFSET: u8 = 12;
     pub const CAPTURE_OFFSET: u8 = Move::FLAG_OFFSET + Flag::CAPTURE_OFFSET;
     pub const PROMOTION_OFFSET: u8 = Move::FLAG_OFFSET + Flag::PROMOTION_OFFSET;
 
-    pub const SOURCE_MASK: u32 = 0b111111 << Move::SOURCE_OFFSET;
-    pub const TARGET_MASK: u32 = 0b111111 << Move::TARGET_OFFSET;
-    pub const PIECE_MASK: u32 =  0b001111 << Move::PIECE_OFFSET;
-    pub const FLAG_MASK: u32  =  0b001111 << Move::FLAG_OFFSET;
+    pub const SOURCE_MASK: u16 = 0b111111 << Move::SOURCE_OFFSET;
+    pub const TARGET_MASK: u16 = 0b111111 << Move::TARGET_OFFSET;
+    pub const FLAG_MASK: u16  =  0b001111 << Move::FLAG_OFFSET;
 
     /// Creates a new move
-    pub fn new(flag: Flag, piece: Piece, target: Square, source: Square) -> Self {
+    pub fn new(flag: Flag, target: Square, source: Square) -> Self {
         Move(
-            (flag as u32) << Move::FLAG_OFFSET
-            | (piece as u32) << Move::PIECE_OFFSET
-            | (target as u32) << Move::TARGET_OFFSET
-            | (source as u32) << Move::SOURCE_OFFSET
+            (flag as u16) << Move::FLAG_OFFSET
+            | (target as u16) << Move::TARGET_OFFSET
+            | (source as u16) << Move::SOURCE_OFFSET
         )
     }
 
@@ -120,7 +116,7 @@ impl Move {
             }
         }
 
-        Move::new(flag, piece, target, source)
+        Move::new(flag, target, source)
     }
 
     /// Returns the source square of the move
@@ -134,13 +130,6 @@ impl Move {
     pub fn target_square(self) -> Square {
         unsafe{
             std::mem::transmute(((self.0 & Move::TARGET_MASK) >> Move::TARGET_OFFSET) as u8)
-        }
-    }
-
-    /// Returns the moving piece of the move
-    pub fn piece(self) -> Piece {
-        unsafe{
-            std::mem::transmute(((self.0 & Move::PIECE_MASK) >> Move::PIECE_OFFSET) as u8)
         }
     }
 
@@ -176,8 +165,7 @@ impl Move {
     /// Converts the move to a string
     pub fn to_string(self) -> String {
         format!(
-            "{} from {} to {}, flags: {:04b}",
-            self.piece().to_unicode(),
+            "{} to {}, flags: {:04b}",
             self.source_square().to_unicode(),
             self.target_square().to_unicode(),
             self.flag() as u8,
@@ -198,7 +186,7 @@ impl MoveList {
     /// Creates a new, empty, movelist
     pub fn new() -> Self {
         MoveList {
-            moves: unsafe { std::mem::transmute([0; 218]) },
+            moves: unsafe { std::mem::transmute([0u16; 218]) },
             length: 0,
             captures: 0
         }
@@ -215,6 +203,42 @@ impl MoveList {
             self.moves[self.length] = move_;
         }
         self.length += 1;
+    }
+
+    /// Sorts the movelist by mvv-lva
+    pub fn sort_mvvlva(&mut self, board: &Board) {
+        let piece_value = |p: Piece| -> i32 {
+            match p {
+                Piece::WhitePawn   | Piece::BlackPawn   => 1,
+                Piece::WhiteKnight | Piece::BlackKnight => 3,
+                Piece::WhiteBishop | Piece::BlackBishop => 3,
+                Piece::WhiteRook   | Piece::BlackRook   => 5,
+                Piece::WhiteQueen  | Piece::BlackQueen  => 9,
+                Piece::WhiteKing   | Piece::BlackKing   => 0,
+            }
+        };
+
+        let score = |mv: Move| -> i32 {
+            let attacker = board.piece_at(mv.source_square()).map_or(0, &piece_value);
+            let victim = if mv.flag() == Flag::ENPASSANT {
+                1
+            } else {
+                board.piece_at(mv.target_square()).map_or(0, &piece_value)
+            };
+            victim * 10 - attacker
+        };
+
+        // insertion sort descending on moves[0..self.captures]
+        for i in 1..self.captures {
+            let key = self.moves[i];
+            let key_score = score(key);
+            let mut j = i;
+            while j > 0 && score(self.moves[j - 1]) < key_score {
+                self.moves[j] = self.moves[j - 1];
+                j -= 1;
+            }
+            self.moves[j] = key;
+        }
     }
 
     /// Removes the last move by decreasing the length. Undefined behaviour

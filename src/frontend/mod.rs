@@ -60,7 +60,7 @@ async fn post_move(
 
     let mut last_move = None;
     if state.board.side != state.player_side {
-        if let Some(bot_mv) = search(&state.board, 6) {
+        if let Some(bot_mv) = search(&mut state.board, 6) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut state.board, bot_mv);
         }
@@ -110,7 +110,7 @@ async fn new_game(
 
     let mut last_move = None;
     if state.player_side == Side::Black {
-        if let Some(bot_mv) = search(&state.board, 6) {
+        if let Some(bot_mv) = search(&mut state.board, 6) {
             last_move = Some(bot_mv.to_uci());
             make_move(&mut state.board, bot_mv);
         }
