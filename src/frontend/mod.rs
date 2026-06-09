@@ -12,7 +12,7 @@ use crate::{
     movegen::{
         attacks::all_attacks,
         generator::generate_movelist,
-        makemove::{is_in_check_after_move, make_move},
+        makemove::{make_move},
         r#move::Move,
     },
     search::{search, tt::TT},
@@ -80,7 +80,7 @@ fn compute_state(board: &Board, player_side: Side, last_move: Option<String>) ->
         .filter(|mv| {
             let mut copy = board.clone();
             make_move(&mut copy, *mv);
-            !is_in_check_after_move(&copy)
+            !copy.in_check(copy.side.other())
         })
         .map(|mv| mv.to_uci())
         .collect();
