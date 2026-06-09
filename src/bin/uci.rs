@@ -11,6 +11,7 @@ fn main() {
     let stdin = io::stdin();
     let mut board = Board::starting_position();
     let mut tt = TT::new(22, 2);
+    let mut history = Box::new([[0i16; 64]; 64]);
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
@@ -67,7 +68,7 @@ fn main() {
                         i += 1;
                     }
                 }
-                match search(&mut board, depth, &mut tt) {
+                match search(&mut board, depth, &mut tt, &mut history) {
                     Some(mv) => print!("bestmove {}\n", mv.to_uci()),
                     None => print!("bestmove 0000\n"),
                 }

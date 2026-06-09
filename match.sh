@@ -10,7 +10,7 @@ GAMES=50
 # ── Engine settings ────────────────────────────────────────────────────────────
 BITCHESS_DEPTH=6
 STOCKFISH_DEPTH=15
-STOCKFISH_ELO=1500   # min 1320, max 3190
+STOCKFISH_ELO=1800   # min 1320, max 3190
 
 # ── Args: [-n name] [-d description] ─────────────────────────────────────────
 NAME=""
