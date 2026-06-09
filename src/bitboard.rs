@@ -337,6 +337,17 @@ impl Board {
     pub const WHITE_QUEEN_CASTLE: u8 = 0b0010;
     pub const WHITE_KING_CASTLE:  u8 = 0b0001;
 
+    pub const DARK_SQUARES: u64 = {
+        let mut bb = 1;
+        bb |= bb << 2;
+        bb |= bb << 4;
+        bb |= bb << 9;
+        bb |= bb << 16;
+        bb |= bb << 32;
+        bb
+    };
+    pub const LIGHT_SQUARES: u64 = !Board::DARK_SQUARES;
+
     /// Returns the starting position of a regular game of chess
     pub fn starting_position() -> Self {
         Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
@@ -358,12 +369,19 @@ impl Board {
         (self.castling & queen != 0, self.castling & king != 0)
     }
 
-    /// Returns if the game drew by repetion or by 50-move rule
+    /// Returns if the game drew by repetion or by 50-move rule or insufficient material
     pub fn is_rule_draw(&self) -> bool {
-        if self.halfmoves >= 50 {
+        if self.halfmoves >= 50 || self.repetitions >= 3 {
             return true;
         }
-        return self.repetitions >= 3;
+        if self.phase == 1 && self.occupied.count_ones() == 3 {
+            return true;
+        }
+        let bishops = self.pieces[Piece::WhiteBishop as usize] | self.pieces[Piece::BlackBishop as usize];
+        if self.phase == 2 && self.occupied.count_ones() == 4 && bishops.count_ones() == 2 && (bishops & Board::LIGHT_SQUARES == bishops || bishops & Board::DARK_SQUARES == bishops) {
+            return true;
+        }
+        false
     }
 
     /// Converts the current board to an array of `Option<Piece>`
@@ -654,6 +672,7 @@ impl HashHistory {
         }
         return repeats;
     }
+    
 
     /// Removes the last move
     pub fn pop(&mut self) {
@@ -663,12 +682,19 @@ impl HashHistory {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::util::format_bitboard;
+
+use super::*;
 
     #[test]
     fn print_starting_position() {
         let board = Board::starting_position();
         println!("ASCII:\n{}\n", board.to_ascii());
         println!("Unicode:\n{}", board.to_unicode());
+    }
+
+    #[test]
+    fn colour() {
+        println!("{}", format_bitboard(Board::DARK_SQUARES));
     }
 }

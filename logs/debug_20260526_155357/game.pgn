@@ -1,0 +1,31 @@
+[Event "?"]
+[Site "?"]
+[Date "2026.05.26"]
+[Round "1"]
+[White "Bitchess"]
+[Black "Stockfish"]
+[Result "1-0"]
+[BlackTimeControl "inf"]
+[ECO "A04"]
+[GameDuration "00:00:41"]
+[GameEndTime "2026-05-26T15:54:39.977 Eastern Daylight Time"]
+[GameStartTime "2026-05-26T15:53:58.693 Eastern Daylight Time"]
+[Opening "Reti Opening"]
+[PlyCount "57"]
+[WhiteTimeControl "inf"]
+
+1. Nf3 {1.2s} e6 {-0.21/15 0.33s} 2. e4 {1.0s} Be7 {-0.28/15 0.30s} 3. d4 {1.8s}
+c5 {-0.82/15 0.36s} 4. c3 {2.4s} d5 {-0.74/15 0.27s} 5. e5 {2.1s}
+Nc6 {-0.79/15 0.27s} 6. Be2 {1.2s} a6 {-0.55/15 0.36s} 7. O-O {1.0s}
+g5 {-0.65/15 0.52s} 8. dxc5 {2.2s} h6 {-0.82/15 0.74s} 9. Be3 {1.5s}
+h5 {-1.05/15 0.47s} 10. c4 {1.3s} Nh6 {-1.89/15 0.20s} 11. cxd5 {2.6s}
+exd5 {-1.86/15 0.15s} 12. Qd2 {1.8s} Bg4 {-1.94/15 0.31s} 13. Nc3 {2.7s}
+d4 {-2.56/15 0.17s} 14. Nxd4 {1.3s} Nf5 {-2.71/15 0.16s} 15. Nxc6 {1.4s}
+Qxd2 {-3.35/15 0.053s} 16. Bxd2 Bxc5 {-3.49/15 0.13s} 17. Bxg4 {0.68s}
+hxg4 {-5.08/15 0.076s} 18. Ne4 {0.83s} Rc8 {-5.12/15 0.11s} 19. Rac1 {3.3s}
+b6 {-5.20/15 0.098s} 20. Nxc5 {0.98s} bxc5 {-5.01/15 0.058s} 21. Na5 {0.71s}
+Rd8 {-4.62/15 0.067s} 22. Bxg5 {0.55s} Rb8 {-5.44/15 0.078s} 23. Rxc5 {1.0s}
+Rh5 {-4.86/15 0.049s} 24. Bf6 {0.51s} g3 {-5.60/15 0.061s} 25. hxg3
+Rxb2 {-6.60/15 0.15s} 26. Nb3 {0.68s} Ng7 {-6.60/15 0.12s} 27. Rd1
+Rh1+ {-M10/15 0.003s} 28. Kxh1 a5 {-M8/15 0.002s} 29. Rd8# {White mates} 1-0
+

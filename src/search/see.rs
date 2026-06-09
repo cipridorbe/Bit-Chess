@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{king_attacks, knight_attacks, pawn_attacks, single_bishop_attacks, single_rook_attacks}, r#move::{Flag, Move}, tables::{BISHOP_EMPTY_ATTACKS, ROOK_EMPTY_ATTAKCS}}, util::{lsb_index, squares}};
 
 const VALUE_ABS: [i16; 12] = [
@@ -100,7 +102,7 @@ pub fn see_sign(board: &Board, initial_move: Move) -> i16 {
     
     let prom_rank = initial_move.target_square().rank() == 0 || initial_move.target_square().rank() == 7;
     occupied &= !(1 << initial_move.source_square() as u8);
-    let mut scores = [0; 32];
+    let mut scores: [i16; 32] = unsafe { std::mem::transmute([MaybeUninit::<i16>::uninit(); 32]) };
     if let Some(captured) = captured_piece {
         scores[0] = VALUE_ABS[captured as usize];
     }
