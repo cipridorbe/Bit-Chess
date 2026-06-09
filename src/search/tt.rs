@@ -1,3 +1,5 @@
+use std::cell::UnsafeCell;
+
 use crate::movegen::r#move::Move;
 
 #[derive(Clone, Copy)]
@@ -43,7 +45,7 @@ pub enum TTFlag {
 }
 
 pub struct TT {
-    pub(crate) table: Vec<TTEntry>,
+    pub(crate) table: UnsafeCell<Vec<TTEntry>>,
     pub(crate) mask: u64,
     pub(crate) generation: u8,
     pub(crate) generation_cutoff: u8,
@@ -53,7 +55,7 @@ pub struct TT {
 impl TT {
     pub fn new(bits: u8, generation_cutoff: u8) -> Self {
         TT {
-            table: vec![TTEntry::empty(); 1 << bits],
+            table: UnsafeCell::new(vec![TTEntry::empty(); 1 << bits]),
             mask: (1 << bits) - 1,
             generation: 0,
             generation_cutoff: generation_cutoff,
@@ -66,12 +68,12 @@ impl TT {
     }
 
     pub fn new_disabled() -> Self {
-        TT { table: vec![], mask: 0, generation: 0, generation_cutoff: 0, enabled: false }
+        TT { table: UnsafeCell::new(vec![]), mask: 0, generation: 0, generation_cutoff: 0, enabled: false }
     }
 
     pub fn find(&self, hash: u64) -> Option<TTEntry> {
         if !self.enabled { return None; }
-        let entry = self.table[(hash & self.mask) as usize];
+        let entry = unsafe { (*self.table.get())[(hash & self.mask) as usize] };
         if entry.hash == 0 || entry.hash != hash {
             None
         } else {
@@ -79,20 +81,24 @@ impl TT {
         }
     }
 
-    pub fn insert(&mut self, entry: TTEntry) {
+    pub fn insert(&self, entry: TTEntry) {
         if !self.enabled { return; }
+        let table = unsafe { &mut *self.table.get() };
         let idx = (entry.hash & self.mask) as usize;
-        if self.table[idx].hash == 0 || entry.depth >= self.table[idx].depth || entry.generation - self.table[idx].generation > self.generation_cutoff {
-            self.table[idx] = entry;
+        if table[idx].hash == 0 || entry.depth >= table[idx].depth || entry.generation - table[idx].generation > self.generation_cutoff {
+            table[idx] = entry;
         }
     }
 }
+
+unsafe impl Send for TT {}
+unsafe impl Sync for TT {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{bitboard::Board, search::search};
-    use std::time::Instant;
+    use std::{sync::{Arc, atomic::AtomicBool}, time::Instant};
 
     const POSITIONS: &[&str] = &[
         // general
@@ -130,14 +136,15 @@ mod tests {
     fn bench(with_tt: bool, depth: u8, cutoff: u8, iters: i32) -> std::time::Duration {
         use crate::movegen::makemove::make_move;
         use crate::movegen::r#move::Move;
-        let mut tt = if with_tt { TT::new(23, cutoff) } else { TT::new_disabled() };
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut tt = if with_tt { Arc::new(TT::new(23, cutoff)) } else { Arc::new(TT::new_disabled()) };
         let mut history = [[0; 64]; 64];
         let mut counter_move = [[None::<Move>; 64]; 64];
         let start = Instant::now();
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
             for _ in 0..iters {
-                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
+                if let Some(mv) = search(&stop, &mut board, depth, &mut tt, &mut history, &mut counter_move) {
                     make_move(&mut board, mv);
                 }
             }
@@ -172,14 +179,14 @@ mod tests {
         println!("  {:>8}  {:>10}  {:>10}", "weight", "time", "nodes");
         for &weight in &[0u8, 1, 2, 4, 8, 255] {
             unsafe { NODE_COUNT = 0; }
-            let mut tt = TT::new(22, weight);
+            let mut tt = Arc::new(TT::new(22, weight));
             let mut history = [[0i16; 64]; 64];
             let mut counter_move = [[None::<Move>; 64]; 64];
             let start = Instant::now();
             for &fen in POSITIONS {
                 let mut board = Board::from_fen(fen);
                 for _ in 0..iters {
-                    if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
+                    if let Some(mv) = search(&Arc::new(AtomicBool::new(false)), &mut board, depth, &mut tt, &mut history, &mut counter_move) {
                         make_move(&mut board, mv);
                     }
                 }
@@ -202,8 +209,8 @@ mod tests {
         use crate::movegen::r#move::Move;
         let depth = 9;
         let iters = 4;
-        // let mut tt = TT::new_disabled();
-        let mut tt = TT::new(22, 2);
+        // let mut tt = Arc::new(TT::new_disabled());
+        let mut tt = Arc::new(TT::new(22, 2));
         let mut history = [[0; 64]; 64];
         let mut counter_move = [[None::<Move>; 64]; 64];
         unsafe { NODE_COUNT = 0; }
@@ -211,7 +218,7 @@ mod tests {
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
             for _ in 0..iters {
-                if let Some(mv) = search(&mut board, depth, &mut tt, &mut history, &mut counter_move) {
+                if let Some(mv) = search(&Arc::new(AtomicBool::new(false)), &mut board, depth, &mut tt, &mut history, &mut counter_move) {
                     make_move(&mut board, mv);
                 }
             }
@@ -245,7 +252,7 @@ mod tests {
 
         let search_depth = 9;
         let iters = 4;
-        let mut tt = TT::new(22, 0);
+        let mut tt = Arc::new(TT::new(22, 0));
         let mut history = [[0i16; 64]; 64];
         let mut counter_move = [[None::<Move>; 64]; 64];
 
@@ -261,7 +268,7 @@ mod tests {
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
             for _ in 0..iters {
-                if let Some(mv) = search(&mut board, search_depth, &mut tt, &mut history, &mut counter_move) {
+                if let Some(mv) = search(&Arc::new(AtomicBool::new(false)), &mut board, search_depth, &mut tt, &mut history, &mut counter_move) {
                     make_move(&mut board, mv);
                 }
             }

@@ -1,6 +1,8 @@
 use axum::{http::StatusCode, routing::{get, post}, Json, Router, response::Html};
 use serde::{Deserialize, Serialize};
 
+use std::sync::{Arc, atomic::AtomicBool};
+
 use bitchess::{
     bitboard::Board,
     movegen::{makemove::make_move, r#move::Move},
@@ -80,7 +82,7 @@ fn run_analysis(req: AnalyzeRequest) -> Vec<AnalysisFrame> {
         None => Board::starting_position(),
     };
     let _engine_side = &req.engine_side;
-    let mut tt = TT::new(22, 2);
+    let mut tt = Arc::new(TT::new(22, 2));
     let mut history = Box::new([[0i16; 64]; 64]);
     let mut counter_move = Box::new([[None::<Move>; 64]; 64]);
     let mut frames = Vec::new();
@@ -92,7 +94,7 @@ fn run_analysis(req: AnalyzeRequest) -> Vec<AnalysisFrame> {
 
         let (eval, best_mv, matches, tt_before, tt_after, hist) = if is_engine {
             let before = tt_info(&tt, hash);
-            let found = search(&mut board, 6, &mut tt, &mut history, &mut counter_move);
+            let found = search(&Arc::new(AtomicBool::new(false)), &mut board, 6, &mut tt, &mut history, &mut counter_move);
             let after = tt_info(&tt, board.hash());
             let eval = after.as_ref().map(|e| e.score);
             let uci = found.map(|m| m.to_uci());
