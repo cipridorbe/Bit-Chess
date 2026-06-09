@@ -190,7 +190,8 @@ impl Move {
 #[derive(Clone)]
 pub struct MoveList {
     moves: [Move; 218],
-    length: usize, 
+    length: usize,
+    captures: usize,
 }
 
 impl MoveList {
@@ -198,14 +199,21 @@ impl MoveList {
     pub fn new() -> Self {
         MoveList {
             moves: unsafe { std::mem::transmute([0; 218]) },
-            length: 0
+            length: 0,
+            captures: 0
         }
     }
 
-    /// Adds the given move to the end of the movelist. Panics if
+    /// Adds the given move to the movelist. Panics if
     /// length >= 218
     pub fn add(&mut self, move_: Move) {
-        self.moves[self.length] = move_;
+        if move_.is_capture() {
+            self.moves[self.length] = self.moves[self.captures];
+            self.moves[self.captures] = move_;
+            self.captures += 1;
+        } else {
+            self.moves[self.length] = move_;
+        }
         self.length += 1;
     }
 

@@ -59,7 +59,7 @@ async fn post_move(
 
     // Run bot if it's its turn (search returns None when no legal moves)
     if state.board.side != state.player_side {
-        if let Some(bot_mv) = search(&state.board) {
+        if let Some(bot_mv) = search(&state.board, 4) {
             make_move(&mut state.board, bot_mv);
         }
     }
@@ -108,7 +108,7 @@ async fn new_game(
 
     // If player chose black, bot plays first as white
     if state.player_side == Side::Black {
-        if let Some(bot_mv) = search(&state.board) {
+        if let Some(bot_mv) = search(&state.board, 4) {
             make_move(&mut state.board, bot_mv);
         }
     }
