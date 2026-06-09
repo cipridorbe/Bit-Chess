@@ -52,3 +52,38 @@ impl Iterator for LSBIndexIter {
 
 /// Returns an iterator over the indices of the set bits in a bitboard
 pub fn squares(bitboard: u64) -> LSBIndexIter { LSBIndexIter(bitboard).into_iter() }
+
+/// Returns an iterator over all of the squares
+pub fn all_squares() -> AllSquaresIterator { AllSquaresIterator(0).into_iter() }
+
+pub struct AllSquaresIterator(u8);
+impl Iterator for AllSquaresIterator {
+    type Item = Square;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.0 < 64 {
+            let out = self.0;
+            self.0 += 1;
+            Some(unsafe { std::mem::transmute(out) })
+        } else {
+            None
+        }
+    }
+}
+
+/// Returns a string representation of a bitboard with rank and file labels
+pub fn format_bitboard(bitboard: u64) -> String {
+    let file_bar = "  a b c d e f g h";
+    let mut out = String::from(file_bar);
+    out.push('\n');
+    for rank in (0..8u8).rev() {
+        out.push_str(&format!("{} ", rank + 1));
+        for file in 0..8u8 {
+            let bit = (bitboard >> (rank * 8 + file)) & 1;
+            out.push(if bit == 1 { '1' } else { '.' });
+            if file < 7 { out.push(' '); }
+        }
+        out.push_str(&format!(" {}\n", rank + 1));
+    }
+    out.push_str(file_bar);
+    out
+}

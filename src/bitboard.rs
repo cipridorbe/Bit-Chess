@@ -73,7 +73,7 @@ impl ToString for Square {
         let ranks = ['1', '2', '3', '4', '5', '6', '7', '8'];
         let files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
         let (rank, file) = self.to_rank_file();
-        format!("{}{}", ranks[rank as usize], files[file as usize])
+        format!("{}{}", files[file as usize], ranks[rank as usize])
     }
 }
 
@@ -286,6 +286,11 @@ pub struct Board {
 }
 
 impl Board {
+
+    pub const A_FILE: u64 = 0x0101010101010101;
+    pub const B_FILE: u64 = 0x0202020202020202;
+    pub const G_FILE: u64 = 0x4040404040404040;
+    pub const H_FILE: u64 = 0x8080808080808080;
 
     pub const BLACK_QUEEN_CASTLE: u8 = 0b1000;
     pub const BLACK_KING_CASTLE:  u8 = 0b0100;
