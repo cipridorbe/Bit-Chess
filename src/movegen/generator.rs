@@ -8,23 +8,23 @@ use crate::{bitboard::{Board, Piece, Side, Square}, movegen::{attacks::{all_atta
 pub fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     let mut movelist = MoveList::new();
     let side = board.side;
+    generate_castling_movelist(&mut movelist, board, captures_only);
     generate_pawn_movelist(&mut movelist, board, captures_only);
     generate_piece_movelist(&mut movelist, board, captures_only, Piece::knight(side), 
     |square, _| KNIGHT_ATTACKS[square as usize]
     );
-    generate_piece_movelist(&mut movelist, board, captures_only, Piece::king(side), 
-    |square, _| KING_ATTACKS[square as usize]
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::bishop(side), 
+        single_bishop_attacks
     );
     generate_piece_movelist(&mut movelist, board, captures_only, Piece::rook(side), 
         single_rook_attacks
     );
-    generate_piece_movelist(&mut movelist, board, captures_only, Piece::bishop(side), 
-        single_bishop_attacks
-    );
     generate_piece_movelist(&mut movelist, board, captures_only, Piece::queen(side), 
         single_queen_attacks
     );
-    generate_castling_movelist(&mut movelist, board, captures_only);
+    generate_piece_movelist(&mut movelist, board, captures_only, Piece::king(side), 
+    |square, _| KING_ATTACKS[square as usize]
+    );
 
     movelist
 }
@@ -44,10 +44,10 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, captures_only:
         for square in squares(attacks) {
             if (1 << square as u8) & (Board::RANK_1 | Board::RANK_8) != 0 {
                 // Promotion
-                movelist.add(Move::new(Flag::ROOKPROMCAP, square, pawn));
-                movelist.add(Move::new(Flag::KNIGHTPROMCAP, square, pawn));
-                movelist.add(Move::new(Flag::BISHOPPROMCAP, square, pawn));
                 movelist.add(Move::new(Flag::QUEENPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::ROOKPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::BISHOPPROMCAP, square, pawn));
+                movelist.add(Move::new(Flag::KNIGHTPROMCAP, square, pawn));
             } else {
                 // Regular capture
                 movelist.add(Move::new(Flag::CAPTURE, square, pawn));
@@ -66,10 +66,10 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, captures_only:
                 if (1 << target as u8) & (Board::RANK_1 | Board::RANK_8) != 0 {
                     // promotion
                     movelist.remove_last();
-                    movelist.add(Move::new(Flag::ROOKPROM, target, pawn));
-                    movelist.add(Move::new(Flag::KNIGHTPROM, target, pawn));
-                    movelist.add(Move::new(Flag::BISHOPPROM, target, pawn));
                     movelist.add(Move::new(Flag::QUEENPROM, target, pawn));
+                    movelist.add(Move::new(Flag::ROOKPROM, target, pawn));
+                    movelist.add(Move::new(Flag::BISHOPPROM, target, pawn));
+                    movelist.add(Move::new(Flag::KNIGHTPROM, target, pawn));
                 } else if (1 << pawn as u8) & (Board::RANK_2 | Board::RANK_7) != 0 {
                     // double pawn push
                     let double_push_square = if side == Side::White {
