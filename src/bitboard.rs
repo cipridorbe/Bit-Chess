@@ -261,28 +261,28 @@ impl Side {
 
 pub struct Board {
     /// Bitboards for each piece, indexed by `Piece`
-    pieces: [u64; 12],
+    pub(crate) pieces: [u64; 12],
 
     /// Bitboards for all pieces of each side, indexed by `Side`
-    sides: [u64; 2],
+    pub(crate) sides: [u64; 2],
 
     /// Bitboard for global occupancy (all pieces)
-    occupied: u64,
+    pub(crate) occupied: u64,
 
     /// The player to play in current turn
-    side: Side,
+    pub(crate) side: Side,
 
     /// Castling information, stored as 0000 bq bk wq wk
-    castling: u8,
+    pub(crate) castling: u8,
 
     /// The square that can be captured by en passant, if any
-    enpassant: Option<Square>,
+    pub(crate) enpassant: Option<Square>,
 
     /// Number of halfmoves since last pawn move or captured, used for 50 move rule
-    halfmoves: u8,
+    pub(crate) halfmoves: u8,
 
     /// Number of full moves since start of the game
-    fullmoves: u8
+    pub(crate) fullmoves: u8
 }
 
 impl Board {
@@ -292,6 +292,11 @@ impl Board {
     pub const G_FILE: u64 = 0x4040404040404040;
     pub const H_FILE: u64 = 0x8080808080808080;
 
+    pub const RANK_1: u64 = 0x00000000000000ff;
+    pub const RANK_2: u64 = 0x000000000000ff00;
+    pub const RANK_7: u64 = 0x00ff000000000000;
+    pub const RANK_8: u64 = 0xff00000000000000;
+
     pub const BLACK_QUEEN_CASTLE: u8 = 0b1000;
     pub const BLACK_KING_CASTLE:  u8 = 0b0100;
     pub const WHITE_QUEEN_CASTLE: u8 = 0b0010;
@@ -300,6 +305,15 @@ impl Board {
     /// Returns the starting position of a regular game of chess
     pub fn starting_position() -> Self {
         Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    }
+
+    /// Returns the queenside/kingside castling rights for the given side
+    pub fn castling_rights(&self, side: Side) -> (bool, bool) {
+        let (queen, king) = match side {
+            Side::White => (Board::WHITE_QUEEN_CASTLE, Board::WHITE_KING_CASTLE),
+            Side::Black => (Board::BLACK_QUEEN_CASTLE, Board::BLACK_KING_CASTLE),
+        };
+        (self.castling & queen != 0, self.castling & king != 0)
     }
 
     /// Converts the current board to an array of `Option<Piece>`

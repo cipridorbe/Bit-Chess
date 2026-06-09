@@ -3,7 +3,7 @@
  pieces can attack.
 */
 
-use crate::{bitboard::{Board, Side, Square}, movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, KING_ATTACKS, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK}, util::{lsb_index_pow2, squares}};
+use crate::{bitboard::{Board, Piece, Side, Square}, movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, KING_ATTACKS, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK}, util::{lsb_index_pow2, squares}};
 
 /// Returns the bitboards of squares attacked by the pawns of the given side
 pub fn pawn_attacks(pawns: u64, side: Side) -> u64 {
@@ -50,7 +50,7 @@ pub fn rook_attacks(rooks: u64, occupancy: u64) -> u64 {
 pub fn bishop_attacks(bishops: u64, occupancy: u64) -> u64 {
     let mut attacks = 0;
     for bishop in squares(bishops) {
-        attacks |= single_rook_attacks(bishop, occupancy);
+        attacks |= single_bishop_attacks(bishop, occupancy);
     }
     attacks
 }
@@ -79,6 +79,24 @@ pub fn single_bishop_attacks(square: Square, occupancy: u64) -> u64 {
     BISHOP_ATTACKS[square as usize][(index >> (64 - BISHOP_BITS[square as usize])) as usize]
 }
 
+/// Generates a bitboard with all attacks for the given side
+pub fn all_attacks(board: &Board, side: Side) -> u64 {
+    let mut out = 0;
+    out |= pawn_attacks(board.pieces[Piece::pawn(side) as usize], side);
+    out |= knight_attacks(board.pieces[Piece::knight(side) as usize]);
+    out |= king_attacks(board.pieces[Piece::king(side) as usize]);
+    out |= rook_attacks(board.pieces[Piece::rook(side) as usize], board.occupied);
+    out |= bishop_attacks(board.pieces[Piece::bishop(side) as usize], board.occupied);
+    out |= queen_attacks(board.pieces[Piece::queen(side) as usize], board.occupied);
+    out
+}
+
+/// Returns the attacks a queen at the given square makes the given
+/// occupancy
+pub fn single_queen_attacks(square: Square, occupancy: u64) -> u64 {
+    single_rook_attacks(square, occupancy) | single_bishop_attacks(square, occupancy)
+}
+
 // =============================================================================
 //                           KING/CASTLING
 // =============================================================================
@@ -91,23 +109,22 @@ pub fn is_in_check(attacks: u64, king: u64) -> bool {
 /// Determines whether or not an attack prevents the king from castling
 /// queen/king side. True indicates the king can castle
 pub fn can_castle(attacks: u64, occupancy: u64, side: Side) -> (bool, bool) {
-    const KING_SIDE_WHITE:  u64 = (1 << (Square::e1 as u8)) | (1 << (Square::f1 as u8)) | (1 << (Square::g1 as u8));
-    const QUEEN_SIDE_WHITE: u64 = (1 << (Square::c1 as u8)) | (1 << (Square::d1 as u8)) | (1 << (Square::e1 as u8));
-    const KING_SIDE_BLACK:  u64 = (1 << (Square::e8 as u8)) | (1 << (Square::f8 as u8)) | (1 << (Square::g8 as u8));
-    const QUEEN_SIDE_BLACK: u64 = (1 << (Square::c8 as u8)) | (1 << (Square::d8 as u8)) | (1 << (Square::e8 as u8));
-
-    const WHITE_KING: u64 = 1 << (Square::e1 as u8);
-    const BLACK_KING: u64 = 1 << (Square::e8 as u8);
+    const KING_SIDE_WHITE:          u64 = (1 << (Square::e1 as u8)) | (1 << (Square::f1 as u8)) | (1 << (Square::g1 as u8));
+    const QUEEN_SIDE_WHITE_OCC:     u64 = (1 << (Square::b1 as u8)) | (1 << (Square::c1 as u8)) | (1 << (Square::d1 as u8));
+    const QUEEN_SIDE_WHITE_ATTACKS: u64 = (1 << (Square::c1 as u8)) | (1 << (Square::d1 as u8)) | (1 << (Square::e1 as u8));
+    const KING_SIDE_BLACK:          u64 = (1 << (Square::e8 as u8)) | (1 << (Square::f8 as u8)) | (1 << (Square::g8 as u8));
+    const QUEEN_SIDE_BLACK_OCC:     u64 = (1 << (Square::b8 as u8)) | (1 << (Square::c8 as u8)) | (1 << (Square::d8 as u8));
+    const QUEEN_SIDE_BLACK_ATTACKS: u64 = (1 << (Square::c8 as u8)) | (1 << (Square::d8 as u8)) | (1 << (Square::e8 as u8));
 
     if side == Side::White {
         (
-            occupancy & QUEEN_SIDE_WHITE == WHITE_KING && attacks & QUEEN_SIDE_WHITE == 0,
-            occupancy & KING_SIDE_WHITE == WHITE_KING && attacks & KING_SIDE_WHITE == 0
+            occupancy & QUEEN_SIDE_WHITE_OCC == 0 && attacks & QUEEN_SIDE_WHITE_ATTACKS == 0,
+            occupancy & KING_SIDE_WHITE == (1 << (Square::e1 as u8)) && attacks & KING_SIDE_WHITE == 0
         )
     } else {
         (
-            occupancy & QUEEN_SIDE_BLACK == BLACK_KING && attacks & QUEEN_SIDE_BLACK == 0,
-            occupancy & KING_SIDE_BLACK == BLACK_KING && attacks & KING_SIDE_BLACK == 0
+            occupancy & QUEEN_SIDE_BLACK_OCC == 0 && attacks & QUEEN_SIDE_BLACK_ATTACKS == 0,
+            occupancy & KING_SIDE_BLACK == (1 << (Square::e8 as u8)) && attacks & KING_SIDE_BLACK == 0
         )
     }
 }
