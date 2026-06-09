@@ -32,6 +32,7 @@ struct GameState {
     game_over: bool,
     status_message: String,
     player_side: String,
+    last_move: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,7 +47,7 @@ struct NewGameRequest {
 
 async fn get_state(State(state): State<SharedState>) -> Json<GameState> {
     let state = state.lock().unwrap();
-    Json(compute_state(&state.board, state.player_side))
+    Json(compute_state(&state.board, state.player_side, None))
 }
 
 async fn post_move(
@@ -57,17 +58,18 @@ async fn post_move(
     let mv = Move::from_uci(&state.board, &req.uci);
     make_move(&mut state.board, mv);
 
-    // Run bot if it's its turn (search returns None when no legal moves)
+    let mut last_move = None;
     if state.board.side != state.player_side {
-        if let Some(bot_mv) = search(&state.board, 4) {
+        if let Some(bot_mv) = search(&state.board, 6) {
+            last_move = Some(bot_mv.to_uci());
             make_move(&mut state.board, bot_mv);
         }
     }
 
-    Json(compute_state(&state.board, state.player_side))
+    Json(compute_state(&state.board, state.player_side, last_move))
 }
 
-fn compute_state(board: &Board, player_side: Side) -> GameState {
+fn compute_state(board: &Board, player_side: Side, last_move: Option<String>) -> GameState {
     let fen = board.to_fen();
     let pseudo_legal = generate_movelist(board);
     let legal_moves: Vec<String> = pseudo_legal
@@ -95,7 +97,7 @@ fn compute_state(board: &Board, player_side: Side) -> GameState {
     };
 
     let player_side = if player_side == Side::White { "w" } else { "b" }.to_string();
-    GameState { fen, legal_moves, game_over, status_message, player_side }
+    GameState { fen, legal_moves, game_over, status_message, player_side, last_move }
 }
 
 async fn new_game(
@@ -106,14 +108,15 @@ async fn new_game(
     state.board = Board::starting_position();
     state.player_side = if req.side == "w" { Side::White } else { Side::Black };
 
-    // If player chose black, bot plays first as white
+    let mut last_move = None;
     if state.player_side == Side::Black {
-        if let Some(bot_mv) = search(&state.board, 4) {
+        if let Some(bot_mv) = search(&state.board, 6) {
+            last_move = Some(bot_mv.to_uci());
             make_move(&mut state.board, bot_mv);
         }
     }
 
-    Json(compute_state(&state.board, state.player_side))
+    Json(compute_state(&state.board, state.player_side, last_move))
 }
 
 pub async fn run() {
