@@ -569,6 +569,13 @@ impl Board {
         let king = Piece::king(self.side);
         self.sides[self.side as usize] & !(self.pieces[pawn as usize] | self.pieces[king as usize]) != 0
     }
+
+    // Returns true if it is a pawn endgame
+    pub fn is_pawn_endgame(&self) -> bool {
+        let pawns = self.pieces[Piece::WhitePawn as usize] | self.pieces[Piece::BlackPawn as usize];
+        let kings = self.pieces[Piece::WhiteKing as usize] | self.pieces[Piece::BlackKing as usize];
+        self.occupied & !(pawns | kings) == 0
+    }
 }
 
 
