@@ -24,7 +24,7 @@
 
 use std::{num::NonZeroU16, ops::{Index, IndexMut}};
 
-use crate::{repr::{board::Board, colour::Colour, piece::Piece, square::Square}, test_assert};
+use crate::{eval::Eval, repr::{board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::see_mvvlva, state::SearchState}, test_assert};
 
 /// Maximum number of moves that can be made from any position
 pub const MAX_MOVES: usize = 218;
@@ -51,6 +51,14 @@ impl Flag {
     pub const CAPTURE_OFFSET: u8 = 2;
     pub const PROMOTION_OFFSET: u8 = 3;
 }
+
+pub type MoveScore = i16;
+pub const TTSCORE: MoveScore = MoveScore::MAX;
+pub const CAPTURE_BASE_SCORE: MoveScore = 30000;
+pub const POSITIVE_SEE_OFFSET: MoveScore = 500;
+pub const KILLERS_SCORE: [MoveScore; 2] = [29000, 28000];
+pub const COUNTERMOVE_SCORE: MoveScore = 27000;
+pub const MAX_HISTORY_VALUE: MoveScore = 16384;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Move(NonZeroU16);
@@ -180,6 +188,17 @@ impl Move {
         self.0.get() & (1 << Move::PROMOTION_OFFSET) != 0
     }
 
+    pub fn score(self, board: &Board, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], counter_move: Option<Move>) -> MoveScore {
+        if Some(self) == killers[0] { return KILLERS_SCORE[0]; }
+        if Some(self) == killers[1] { return KILLERS_SCORE[1]; }
+        if Some(self) == counter_move { return COUNTERMOVE_SCORE; }
+        if self.is_capture() {
+            return see_mvvlva(board, self);
+        } else {
+            return history[self.source_square() as usize][self.target_square() as usize];
+        }
+    }
+
     /// Converts the move to UCI notation (e.g. "e2e4", "e7e8q")
     pub fn to_uci(self) -> String {
         let promo = match self.flag() {
@@ -226,6 +245,32 @@ impl MoveList {
         self.length += 1;
         if mv.is_capture() {
             self.captures += 1;
+        }
+    }
+
+    pub fn score(&mut self, board: &Board, search_state: &SearchState, exclude_move: Option<Move>, ply: u8) -> [Eval; 218] {
+        let mut out = [0; 218];
+        let mut i = 0;
+        let killers = &search_state.killers[ply as usize];
+        let counter_move = board.move_history.last().and_then(|prev| 
+            search_state.counter_move[prev.source_square() as usize][prev.target_square() as usize]
+        );
+        while i < self.length {
+            if Some(self[i]) == exclude_move {
+                self.length -= 1;
+                self[i] = self[self.length];
+                continue;
+            }
+            out[i] = self[i].score(board, killers, &search_state.history, counter_move);
+            i += 1;
+        }
+        out
+    }
+
+    pub fn sort(&mut self, scores: &[MoveScore; 218]) {
+        for i in 1..self.length {
+            let mv = self[i];
+            let score = scores[i];
         }
     }
 }

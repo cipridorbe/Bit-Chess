@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
-use crate::{eval::Eval, movegen::r#move::Move, search::{MAX_PLY, tt::TT}};
-
-pub const MAX_HISTORY_VALUE: Eval = 16384;
+use crate::{movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
 
 #[derive(Clone)]
 pub struct SearchState {
     pub tt: Arc<TT>,
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
-    pub history: [[Eval; 64]; 64],
+    pub history: [[MoveScore; 64]; 64],
     pub counter_move: [[Option<Move>; 64]; 64],
     pub node_count: u64,
 }

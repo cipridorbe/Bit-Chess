@@ -1,4 +1,4 @@
-use crate::repr::colour::Colour;
+use crate::{movegen::r#move::MoveScore, repr::colour::Colour};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Piece {
@@ -33,6 +33,11 @@ impl Piece {
     pub const PHASE_VALUES: [u8; 12] = [
         0, 1, 1, 2, 4, 0,
         0, 1, 1, 2, 4, 0,
+    ];
+
+    pub const MVVLVA_VALUES: [MoveScore; 12] = [
+        1, 2, 2, 3, 4, 10,
+        1, 2, 2, 3, 4, 10,
     ];
 
     pub fn piece_type(self) -> PieceType {

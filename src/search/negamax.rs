@@ -54,6 +54,13 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
+    // If no tt move is found, find the best move by performing a shallower search
+    // TODO: test if pv_node improves speed
+    if tt_move.is_none() && depth >= 4 {
+        let new_depth = depth / 2 + 1;
+        tt_move = negamax(stop_flag, board, state, new_depth, ply + 1, -beta, -alpha, false).0;
+    }
+
     // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
         let unmake_info = board.makemove(mv);
@@ -68,7 +75,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
-    let movelist = board.generate_movelist(false);
+    let mut movelist = board.generate_movelist(false);
     panic!()
 }
 
