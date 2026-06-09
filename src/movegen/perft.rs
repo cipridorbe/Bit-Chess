@@ -2,17 +2,18 @@
 Counts the number of moves at any given position. Used for testing purposes.
 */
 
-use crate::{bitboard::Board, movegen::{generator::generate_movelist, makemove::{is_in_check_after_move, make_move}}};
+use crate::{bitboard::Board, movegen::{generator::generate_movelist, makemove::{is_in_check_after_move, make_move, unmake_move}}};
 
 pub fn perft(board: &Board, depth: u32) -> u64 {
+    let mut board= board.clone();
     if depth == 0 { return 1; }
     let mut out = 0;
-    for mv in generate_movelist(board).iter() {
-        let mut copy = board.clone();
-        make_move(&mut copy, mv);
-        if !is_in_check_after_move(&copy) {
-            out += perft(&copy, depth - 1);
+    for mv in generate_movelist(&board).iter() {
+        let unmake = make_move(&mut board, mv);
+        if !is_in_check_after_move(&board) {
+            out += perft(&board, depth - 1);
         }
+        unmake_move(&mut board, mv, unmake);
     }
     out
 }
