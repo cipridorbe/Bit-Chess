@@ -220,6 +220,31 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     unmake_info
 }
 
+fn null_makemove(board: &mut Board) -> NullUnmakeInfo {
+    let null_unmake_info = NullUnmakeInfo::read(board);
+    let colour = board.colour;
+
+    if colour == Colour::Black {
+        board.fullmoves += 1;
+    }
+    board.halfmove_clock = 0;
+
+    board.state.hash ^= Hash::SIDE_HASH;
+
+    if let Some(enpassant) = board.enpassant {
+        board.state.hash ^= Hash::ENPASSANT_HASH[enpassant.file() as usize];
+    }
+    board.enpassant = None;
+
+    board.colour = !colour;
+    board.hash_history.push(board.state.hash);
+    board.move_history.push(Move::NULL_MOVE);
+    board.state.repetitions = 1;
+    board.state.checkers = BB::new(0);
+
+    null_unmake_info
+}
+
 fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) {
     let colour = board.colour;
 
@@ -296,6 +321,18 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
     board.colour = !colour;
 }
 
+fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
+    test_assert!(board.move_history.last() == Some(Move::NULL_MOVE));
+    null_unmake_info.write(board);
+    let colour = board.colour;
+    if colour == Colour::White {
+        board.fullmoves -= 1;
+    }
+    board.colour = !colour;
+    board.hash_history.pop();
+    board.move_history.pop();
+}
+
 fn is_legal(board: &Board, mv: Move) -> bool {
     let colour = board.colour;
     let piece = board[mv.source_square()].unwrap();
@@ -357,6 +394,14 @@ impl Board {
         unmakemove(self, mv, mv_score, unmake_info, movelist);
     }
 
+    pub fn null_makemove(&mut self) -> NullUnmakeInfo {
+        null_makemove(self)
+    }
+
+    pub fn null_unmakemove(&mut self, null_unmake_info: NullUnmakeInfo) {
+        null_unmakemove(self, null_unmake_info);
+    }
+
     pub fn is_legal(&self, mv: Move) -> bool {
         is_legal(self, mv)
     }
@@ -389,5 +434,33 @@ impl UnmakeInfo {
         board.castling_rights = self.castling_rights;
         board.enpassant = self.enpassant;
         board.halfmove_clock = self.halfmove_clock
+    }
+}
+
+pub struct NullUnmakeInfo {
+    enpassant: Option<Square>,
+    halfmove_clock: u8,
+    hash: Hash,
+    checkers: BB,
+    repetitions: u8
+}
+
+impl NullUnmakeInfo {
+    pub fn read(board: &Board) -> Self {
+        NullUnmakeInfo {
+            enpassant: board.enpassant,
+            halfmove_clock: board.halfmove_clock,
+            hash: board.state.hash,
+            checkers: board.state.checkers,
+            repetitions: board.state.repetitions
+        }
+    }
+
+    pub fn write(self, board: &mut Board) {
+        board.enpassant = self.enpassant;
+        board.halfmove_clock = self.halfmove_clock;
+        board.state.hash = self.hash;
+        board.state.checkers = self.checkers;
+        board.state.repetitions = self.repetitions;
     }
 }

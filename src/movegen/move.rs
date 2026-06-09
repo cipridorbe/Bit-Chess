@@ -66,6 +66,8 @@ impl Move {
     pub const TARGET_MASK: u16 = 0b111111 << Move::TARGET_OFFSET;
     pub const FLAG_MASK: u16  =  0b001111 << Move::FLAG_OFFSET;
 
+    pub const NULL_MOVE: Move = unsafe { std::mem::transmute(0x0fffu16) };
+
     const fn new_invalid() -> Self {
         unsafe { std::mem::transmute(0xffffu16) }
     }

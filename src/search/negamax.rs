@@ -1,12 +1,12 @@
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
-use crate::{eval::Eval, movegen::r#move::Move, repr::board::{self, Board}, search::{MAX_PLY, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, MATE_CUTOFF}, movegen::r#move::Move, repr::board::{self, Board}, search::{MAX_PLY, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, u8) {
     panic!()
 }
 
-pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, depth: u8, ply: u8, mut alpha: Eval, mut beta: Eval) -> (Option<Move>, Eval) {
+pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, depth: u8, ply: u8, mut alpha: Eval, mut beta: Eval, null_move_allowed: bool) -> (Option<Move>, Eval) {
     state.node_count += 1;
 
     // if stop flag is set, stop the search
@@ -42,18 +42,33 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     let original_alpha = alpha;
 
+    // Try to create a beta cutoff with a null move
+    if null_move_allowed && ply > 1 && !board.in_check() && depth >= 4 && board.state.phase_unbounded > 0 && beta < MATE_CUTOFF && !is_pv {
+        let null_unmake = board.null_makemove();
+        let score = -negamax(stop_flag, board, state, depth / 2, ply + 1, -beta-1, -beta, false).1;
+        board.null_unmakemove(null_unmake);
+        if score >= beta {
+            let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, None, depth, state.tt.generation());
+            state.tt.insert(tt_entry, ply);
+            return (None, score)
+        }
+    }
+
+    // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
         let unmake_info = board.makemove(mv);
-        let score = -negamax(stop_flag, board, state, depth - 1, ply + 1, -beta, -alpha).1;
+        let score = -negamax(stop_flag, board, state, depth - 1, ply + 1, -beta, -alpha, true).1;
         board.unmakemove(mv, score, unmake_info, None);
         alpha = alpha.max(score);
         if alpha >= beta {
             state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
             let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
-            state.tt.insert(tt_entry);
+            state.tt.insert(tt_entry, ply);
             return (tt_move, score)
         }
     }
+
+    let movelist = board.generate_movelist(false);
     panic!()
 }
 

@@ -67,12 +67,13 @@ impl TT {
         }
     }
 
-    pub fn insert(&self, entry: TTEntry) {
+    pub fn insert(&self, mut entry: TTEntry, ply: u8) {
         let idx = entry.hash.0 & self.mask;
         let current_entry = unsafe { &mut *self.table[idx as usize].get() };
         if entry.generation - current_entry.generation >= self.generation_cutoff
             || entry.depth >= current_entry.depth || current_entry.hash.0 == 0
         {
+            entry.eval = adjust_insert_eval(entry.eval, ply);
             *current_entry = entry;
         }
     }
@@ -85,7 +86,7 @@ impl TT {
 unsafe impl Send for TT {}
 unsafe impl Sync for TT {}
 
-pub fn adjust_insert_eval(eval: Eval, ply: u8) -> Eval {
+fn adjust_insert_eval(eval: Eval, ply: u8) -> Eval {
     if eval.abs() < MATE_CUTOFF {
         eval
     } else {
