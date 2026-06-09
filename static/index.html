@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bitchess</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      font-family: system-ui, sans-serif;
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    h1 { font-size: 1.8rem; letter-spacing: 3px; color: #d4af37; }
+
+    /* ── Board layout ─────────────────────────────────── */
+    .board-outer { display: flex; flex-direction: column; gap: 5px; }
+
+    .board-row { display: flex; gap: 6px; align-items: stretch; }
+
+    .rank-labels {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-around;
+      width: 18px;
+    }
+    .rank-label {
+      font-size: 15px;
+      font-weight: 700;
+      color: #b0b0cc;
+      text-align: center;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .file-labels {
+      display: flex;
+      /* left offset = rank-labels width + gap */
+      margin-left: calc(18px + 6px);
+      width: min(80vmin, 560px);
+    }
+    .file-label {
+      flex: 1;
+      font-size: 15px;
+      font-weight: 700;
+      color: #b0b0cc;
+      text-align: center;
+    }
+
+    /* ── Board grid ───────────────────────────────────── */
+    .board {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      grid-template-rows:    repeat(8, 1fr);
+      width:  min(80vmin, 560px);
+      height: min(80vmin, 560px);
+      border: 3px solid #5a3a1a;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+      flex-shrink: 0;
+    }
+
+    .sq {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+    }
+    .sq img {
+      width: 87%;
+      height: 87%;
+      object-fit: contain;
+      pointer-events: none;
+      filter: drop-shadow(1px 2px 3px rgba(0,0,0,0.45));
+    }
+    .sq:hover { filter: brightness(1.1); }
+    .sq.light  { background: #f0d9b5; }
+    .sq.dark   { background: #b58863; }
+    .sq.selected   { background: #5ac044 !important; }
+    .sq.last-from  { background: rgba(255,215,0,0.40) !important; }
+    .sq.last-to    { background: rgba(255,215,0,0.60) !important; }
+
+    /* legal move: dot for empty square */
+    .sq.legal-empty::after {
+      content: '';
+      position: absolute;
+      width: 33%;
+      height: 33%;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.18);
+      pointer-events: none;
+    }
+    /* legal move: ring for occupied square */
+    .sq.legal-capture::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      box-shadow: inset 0 0 0 6px rgba(0,0,0,0.20);
+      pointer-events: none;
+    }
+
+    /* ── Status & controls ────────────────────────────── */
+    .status-bar {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #d4af37;
+      min-height: 28px;
+      letter-spacing: 0.5px;
+    }
+    .btn {
+      background: #d4af37;
+      color: #1a1a2e;
+      border: none;
+      padding: 10px 28px;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 1px;
+    }
+    .btn:hover { background: #e8c84a; }
+
+    /* ── Promotion modal ──────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      justify-content: center;
+      align-items: center;
+      z-index: 10;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal {
+      background: #2a2a4a;
+      border: 2px solid #d4af37;
+      border-radius: 12px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .modal p { color: #ccc; font-size: 1rem; }
+    .promo-choices { display: flex; gap: 10px; }
+    .promo-btn {
+      width: 76px;
+      height: 76px;
+      cursor: pointer;
+      padding: 6px;
+      border-radius: 8px;
+      border: 2px solid transparent;
+      background: rgba(255,255,255,0.06);
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .promo-btn img { width: 100%; height: 100%; }
+    .promo-btn:hover { background: rgba(255,255,255,0.15); border-color: #d4af37; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>BITCHESS</h1>
+    <div class="status-bar" id="status">Loading…</div>
+    <div class="board-outer">
+      <div class="board-row">
+        <div class="rank-labels" id="rank-labels"></div>
+        <div class="board" id="board"></div>
+      </div>
+      <div class="file-labels" id="file-labels"></div>
+    </div>
+    <button class="btn" onclick="newGame()">New Game</button>
+  </div>
+
+  <div class="modal-overlay" id="promo-overlay">
+    <div class="modal">
+      <p>Choose promotion piece</p>
+      <div class="promo-choices" id="promo-choices"></div>
+    </div>
+  </div>
+
+  <script>
+    const FILES = ['a','b','c','d','e','f','g','h'];
+    const RANKS = ['1','2','3','4','5','6','7','8'];
+
+    // Lichess cburnett SVG set via jsDelivr CDN
+    const PIECE_BASE = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
+    const PIECE_FILE = {
+      'P':'wP','N':'wN','B':'wB','R':'wR','Q':'wQ','K':'wK',
+      'p':'bP','n':'bN','b':'bB','r':'bR','q':'bQ','k':'bK'
+    };
+    const pieceUrl = f => PIECE_BASE + PIECE_FILE[f] + '.svg';
+
+    // [UCI char, image key] for each promotion option
+    const PROMO_W = [['q','wQ'],['r','wR'],['b','wB'],['n','wN']];
+    const PROMO_B = [['q','bQ'],['r','bR'],['b','bB'],['n','bN']];
+
+    let state        = null;
+    let selected     = null;   // square string e.g. "e2"
+    let selectedMoves = [];    // legal moves starting from `selected`
+    let lastMove     = null;   // { from, to }
+    let pendingPromo = null;   // { from, to }
+
+    // ── Coordinate labels ──────────────────────────────
+    function buildCoords() {
+      const rl = document.getElementById('rank-labels');
+      const fl = document.getElementById('file-labels');
+      rl.innerHTML = fl.innerHTML = '';
+      for (let r = 7; r >= 0; r--) {
+        const d = document.createElement('div');
+        d.className = 'rank-label';
+        d.textContent = RANKS[r];
+        rl.appendChild(d);
+      }
+      for (let f = 0; f < 8; f++) {
+        const d = document.createElement('div');
+        d.className = 'file-label';
+        d.textContent = FILES[f];
+        fl.appendChild(d);
+      }
+    }
+
+    // ── FEN parsing ────────────────────────────────────
+    function fenToMap(fen) {
+      const map = {};
+      const rows = fen.split(' ')[0].split('/');
+      for (let r = 7; r >= 0; r--) {
+        let f = 0;
+        for (const ch of rows[7 - r]) {
+          if (isNaN(ch)) { map[FILES[f] + RANKS[r]] = ch; f++; }
+          else f += +ch;
+        }
+      }
+      return map;
+    }
+
+    // ── Board rendering ────────────────────────────────
+    function renderBoard() {
+      const boardEl = document.getElementById('board');
+      boardEl.innerHTML = '';
+      if (!state) return;
+
+      const pieces  = fenToMap(state.fen);
+      const side    = state.fen.split(' ')[1];
+      const targets = new Set(selectedMoves.map(m => m.slice(2, 4)));
+
+      for (let r = 7; r >= 0; r--) {
+        for (let f = 0; f < 8; f++) {
+          const sq    = FILES[f] + RANKS[r];
+          const light = (f + r) % 2 !== 0;
+          const piece = pieces[sq];
+
+          const div = document.createElement('div');
+          div.className = 'sq ' + (light ? 'light' : 'dark');
+
+          if (piece) {
+            const img = document.createElement('img');
+            img.src = pieceUrl(piece);
+            img.draggable = false;
+            div.appendChild(img);
+          }
+
+          if (sq === selected)      div.classList.add('selected');
+          if (lastMove?.from === sq) div.classList.add('last-from');
+          if (lastMove?.to   === sq) div.classList.add('last-to');
+          if (targets.has(sq))       div.classList.add(piece ? 'legal-capture' : 'legal-empty');
+
+          div.addEventListener('click', () => onSquareClick(sq, pieces, side));
+          boardEl.appendChild(div);
+        }
+      }
+    }
+
+    // ── Interaction ────────────────────────────────────
+    function onSquareClick(sq, pieces, side) {
+      if (state.game_over) return;
+
+      const piece = pieces[sq];
+      const isMyPiece = piece && (
+        (side === 'w' && /[A-Z]/.test(piece)) ||
+        (side === 'b' && /[a-z]/.test(piece))
+      );
+
+      if (selected && selectedMoves.some(m => m.slice(2, 4) === sq)) {
+        const uci    = selected + sq;
+        const isPromo = selectedMoves.some(m => m.startsWith(uci) && m.length === 5);
+        if (isPromo) {
+          pendingPromo = { from: selected, to: sq };
+          showPromoModal(side);
+          selected = null; selectedMoves = [];
+          return;
+        }
+        submitMove(uci);
+        return;
+      }
+
+      if (isMyPiece) {
+        selected = sq;
+        selectedMoves = state.legal_moves.filter(m => m.startsWith(sq));
+        renderBoard();
+        return;
+      }
+
+      selected = null; selectedMoves = [];
+      renderBoard();
+    }
+
+    async function submitMove(uci) {
+      lastMove = { from: uci.slice(0, 2), to: uci.slice(2, 4) };
+      selected = null; selectedMoves = [];
+      const res = await fetch('/api/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uci }),
+      });
+      state = await res.json();
+      updateStatus();
+      renderBoard();
+    }
+
+    // ── Promotion modal ────────────────────────────────
+    function showPromoModal(side) {
+      const choices   = side === 'w' ? PROMO_W : PROMO_B;
+      const container = document.getElementById('promo-choices');
+      container.innerHTML = '';
+      for (const [uciPiece, imgKey] of choices) {
+        const btn = document.createElement('button');
+        btn.className = 'promo-btn';
+        const img = document.createElement('img');
+        img.src = PIECE_BASE + imgKey + '.svg';
+        img.alt = uciPiece;
+        btn.appendChild(img);
+        btn.onclick = () => {
+          document.getElementById('promo-overlay').classList.remove('show');
+          if (pendingPromo) {
+            submitMove(pendingPromo.from + pendingPromo.to + uciPiece);
+            pendingPromo = null;
+          }
+        };
+        container.appendChild(btn);
+      }
+      document.getElementById('promo-overlay').classList.add('show');
+    }
+
+    // ── Status & new game ──────────────────────────────
+    function updateStatus() {
+      const el = document.getElementById('status');
+      if (!state) { el.textContent = 'Loading…'; return; }
+      if (state.game_over) {
+        el.textContent = state.status_message;
+      } else {
+        const side = state.fen.split(' ')[1];
+        el.textContent = side === 'w' ? 'White to move' : 'Black to move';
+      }
+    }
+
+    async function newGame() {
+      await fetch('/api/new', { method: 'POST' });
+      lastMove = null; selected = null; selectedMoves = [];
+      const res = await fetch('/api/state');
+      state = await res.json();
+      updateStatus();
+      renderBoard();
+    }
+
+    async function init() {
+      buildCoords();
+      const res = await fetch('/api/state');
+      state = await res.json();
+      updateStatus();
+      renderBoard();
+    }
+
+    init();
+  </script>
+</body>
+</html>

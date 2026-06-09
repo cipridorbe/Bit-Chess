@@ -161,6 +161,18 @@ impl Move {
         self.0 & 1 << Move::PROMOTION_OFFSET != 0
     }
 
+    /// Converts the move to UCI notation (e.g. "e2e4", "e7e8q")
+    pub fn to_uci(self) -> String {
+        let promo = match self.flag() {
+            Flag::KNIGHTPROM | Flag::KNIGHTPROMCAP => "n",
+            Flag::BISHOPPROM | Flag::BISHOPPROMCAP => "b",
+            Flag::ROOKPROM   | Flag::ROOKPROMCAP   => "r",
+            Flag::QUEENPROM  | Flag::QUEENPROMCAP  => "q",
+            _ => "",
+        };
+        format!("{}{}{}", self.source_square().to_fen(), self.target_square().to_fen(), promo)
+    }
+
     /// Converts the move to a string
     pub fn to_string(self) -> String {
         format!(
@@ -201,5 +213,9 @@ impl MoveList {
     /// if length == 0
     pub fn remove_last(&mut self) {
         self.length -= 1;
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Move> + '_ {
+        self.moves[..self.length].iter().copied()
     }
 }
