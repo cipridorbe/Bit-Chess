@@ -227,7 +227,10 @@ pub fn relative_eval(board: &Board) -> i16 {
     let phase2 = board.pieces[Piece::WhiteRook as usize] | board.pieces[Piece::BlackRook as usize];
     let phase4 = board.pieces[Piece::WhiteQueen as usize] | board.pieces[Piece::BlackQueen as usize];
     let phase = (phase1.count_ones() + phase2.count_ones() * 2 + phase4.count_ones() * 4).min(24) as i32;
-    let score = ((board.mg_score + king_bonus(board)) as i32 * phase + board.eg_score as i32 * (24 - phase)) / 24;
+    let bishop_bonus = bishop_bonus(board);
+    let mg_score = board.mg_score + king_bonus(board) + bishop_bonus / 2;
+    let eg_score = board.eg_score + bishop_bonus;
+    let score = (mg_score as i32 * phase + eg_score as i32 * (24 - phase)) / 24;
     let eval = score as i16 + pawn_bonus(board);
     match board.side {
         Side::White => eval,
