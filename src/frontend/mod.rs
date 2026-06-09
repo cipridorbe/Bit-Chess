@@ -126,7 +126,7 @@ pub async fn run() {
     let state = Arc::new(Mutex::new(AppState {
         board: Board::starting_position(),
         player_side: Side::White,
-        tt: TT::new(22),
+        tt: TT::new(22, 2),
     }));
 
     let app = Router::new()

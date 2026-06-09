@@ -1,16 +1,16 @@
 use once_cell::sync::Lazy;
 use crate::{bitboard::{Board, Piece, Side}, util::squares};
 
-pub const PIECE_VALUE: [f32; 12] = [
-    01., 03., 03., 05., 09., 0.,
-    -1., -3., -3., -5., -9., 0.
+pub const PIECE_VALUE: [i16; 12] = [
+    0100, 0300, 0300, 0500, 0900, 000,
+    -100, -300, -300, -500, -900, 000
 ];
 
 // Piece-square tables in centipawns from White's perspective.
 // Indexed rank 1..8 × file a..h, matching square indices 0..63.
 // Source: Tomasz Michniewski's simplified evaluation function.
 #[rustfmt::skip]
-const PAWN_PST: [i32; 64] = [
+const PAWN_PST: [i16; 64] = [
      0,  0,  0,  0,  0,  0,  0,  0,  // rank 1
      5, 10, 10,-20,-20, 10, 10,  5,  // rank 2
      5, -5,-10,  0,  0,-10, -5,  5,  // rank 3
@@ -22,7 +22,7 @@ const PAWN_PST: [i32; 64] = [
 ];
 
 #[rustfmt::skip]
-const KNIGHT_PST: [i32; 64] = [
+const KNIGHT_PST: [i16; 64] = [
     -50,-40,-30,-30,-30,-30,-40,-50,  // rank 1
     -40,-20,  0,  5,  5,  0,-20,-40,  // rank 2
     -30,  5, 10, 15, 15, 10,  5,-30,  // rank 3
@@ -34,7 +34,7 @@ const KNIGHT_PST: [i32; 64] = [
 ];
 
 #[rustfmt::skip]
-const BISHOP_PST: [i32; 64] = [
+const BISHOP_PST: [i16; 64] = [
     -20,-10,-10,-10,-10,-10,-10,-20,  // rank 1
     -10,  5,  0,  0,  0,  0,  5,-10,  // rank 2
     -10, 10, 10, 10, 10, 10, 10,-10,  // rank 3
@@ -46,7 +46,7 @@ const BISHOP_PST: [i32; 64] = [
 ];
 
 #[rustfmt::skip]
-const ROOK_PST: [i32; 64] = [
+const ROOK_PST: [i16; 64] = [
      0,  0,  0,  5,  5,  0,  0,  0,  // rank 1
     -5,  0,  0,  0,  0,  0,  0, -5,  // rank 2
     -5,  0,  0,  0,  0,  0,  0, -5,  // rank 3
@@ -58,7 +58,7 @@ const ROOK_PST: [i32; 64] = [
 ];
 
 #[rustfmt::skip]
-const QUEEN_PST: [i32; 64] = [
+const QUEEN_PST: [i16; 64] = [
     -20,-10,-10, -5, -5,-10,-10,-20,  // rank 1
     -10,  0,  5,  0,  0,  0,  0,-10,  // rank 2
     -10,  5,  5,  5,  5,  5,  0,-10,  // rank 3
@@ -70,7 +70,7 @@ const QUEEN_PST: [i32; 64] = [
 ];
 
 #[rustfmt::skip]
-const KING_PST: [i32; 64] = [
+const KING_PST: [i16; 64] = [
      20, 30, 10,  0,  0, 10, 30, 20,  // rank 1
      20, 20,  0,  0,  0,  0, 20, 20,  // rank 2
     -10,-20,-20,-20,-20,-20,-20,-10,  // rank 3
@@ -85,9 +85,9 @@ const KING_PST: [i32; 64] = [
 /// White pieces (0–5) use the tables above directly.
 /// Black pieces (6–11) mirror the table vertically (sq ^ 56 flips rank)
 /// and negate, so the score is still from White's perspective.
-pub static PST: Lazy<[[i32; 64]; 12]> = Lazy::new(|| {
+pub static PST: Lazy<[[i16; 64]; 12]> = Lazy::new(|| {
     let white = [PAWN_PST, KNIGHT_PST, BISHOP_PST, ROOK_PST, QUEEN_PST, KING_PST];
-    let mut pst = [[0i32; 64]; 12];
+    let mut pst = [[0i16; 64]; 12];
     for (i, table) in white.iter().enumerate() {
         pst[i] = *table;
         for sq in 0..64usize {
@@ -100,13 +100,13 @@ pub static PST: Lazy<[[i32; 64]; 12]> = Lazy::new(|| {
 /// Evaluates the given position absolutely. Positions good for white are
 /// positive and positions good for black are negative, regardless of whose
 /// turn it is.
-pub fn eval(board: &Board) -> f32 {
+pub fn eval(board: &Board) -> i16 {
     piece_eval(board) + piece_position_bonus(board)
 }
 
 /// Evaluates the given position with respect to the current player. If the
 /// current player is winning it is positive, otherwise negative
-pub fn relative_eval(board: &Board) -> f32 {
+pub fn relative_eval(board: &Board) -> i16 {
     let eval = eval(board);
     match board.side {
         Side::White => eval,
@@ -115,24 +115,24 @@ pub fn relative_eval(board: &Board) -> f32 {
 }
 
 /// Evaluates a board state using only piece values
-pub fn piece_eval(board: &Board) -> f32 {
-    let mut score = 0.;
+pub fn piece_eval(board: &Board) -> i16 {
+    let mut score = 0;
     for piece in Piece::ALL {
         let bb = board.pieces[piece as usize];
-        score += PIECE_VALUE[piece as usize] * bb.count_ones() as f32;
+        score += PIECE_VALUE[piece as usize] * bb.count_ones() as i16;
     }
     score
 }
 
 /// Evaluates positional bonuses using piece-square tables.
 /// Returns a score in pawn units (positive = good for White).
-pub fn piece_position_bonus(board: &Board) -> f32 {
-    let mut score = 0i32;
+pub fn piece_position_bonus(board: &Board) -> i16 {
+    let mut score = 0;
     for piece in Piece::ALL {
         let bb = board.pieces[piece as usize];
         for square in squares(bb) {
             score += PST[piece as usize][square as usize];
         }
     }
-    score as f32 / 100.0
+    score
 }

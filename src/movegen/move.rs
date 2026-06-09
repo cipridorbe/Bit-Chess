@@ -22,6 +22,8 @@
   1 1 1 1  Queen promotion capture  
 */
 
+use std::num::NonZeroU16;
+
 use crate::bitboard::{Board, Piece, Side, Square};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,7 +50,7 @@ impl Flag {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Move(u16);
+pub struct Move(NonZeroU16);
 
 impl Move {
     pub const SOURCE_OFFSET: u8 = 0;
@@ -63,11 +65,11 @@ impl Move {
 
     /// Creates a new move
     pub fn new(flag: Flag, target: Square, source: Square) -> Self {
-        Move(
+        Move(unsafe { std::mem::transmute(
             (flag as u16) << Move::FLAG_OFFSET
             | (target as u16) << Move::TARGET_OFFSET
             | (source as u16) << Move::SOURCE_OFFSET
-        )
+        )})
     }
 
     /// Creates a Move from a UCI move on a given board. Undefined behaviour
@@ -122,32 +124,32 @@ impl Move {
     /// Returns the source square of the move
     pub fn source_square(self) -> Square {
         unsafe{
-            std::mem::transmute(((self.0 & Move::SOURCE_MASK) >> Move::SOURCE_OFFSET) as u8)
+            std::mem::transmute(((u16::from(self.0) & Move::SOURCE_MASK) >> Move::SOURCE_OFFSET) as u8)
         }
     }
 
     /// Returns the target square of the move
     pub fn target_square(self) -> Square {
         unsafe{
-            std::mem::transmute(((self.0 & Move::TARGET_MASK) >> Move::TARGET_OFFSET) as u8)
+            std::mem::transmute(((u16::from(self.0) & Move::TARGET_MASK) >> Move::TARGET_OFFSET) as u8)
         }
     }
 
     /// Returns the flag associated with the move
     pub fn flag(self) -> Flag {
         unsafe{
-            std::mem::transmute(((self.0 & Move::FLAG_MASK) >> Move::FLAG_OFFSET) as u8)
+            std::mem::transmute(((u16::from(self.0) & Move::FLAG_MASK) >> Move::FLAG_OFFSET) as u8)
         }
     }
 
     /// Returns true if the move is a capture
     pub fn is_capture(self) -> bool {
-        self.0 & 1 << Move::CAPTURE_OFFSET != 0
+        u16::from(self.0) & 1 << Move::CAPTURE_OFFSET != 0
     }
 
     /// Returns true if the move is a promotion
     pub fn is_promotion(self) -> bool {
-        self.0 & 1 << Move::PROMOTION_OFFSET != 0
+        u16::from(self.0) & 1 << Move::PROMOTION_OFFSET != 0
     }
 
     /// Converts the move to UCI notation (e.g. "e2e4", "e7e8q")
@@ -186,7 +188,7 @@ impl MoveList {
     /// Creates a new, empty, movelist
     pub fn new() -> Self {
         MoveList {
-            moves: unsafe { std::mem::transmute([0u16; 218]) },
+            moves: unsafe { std::mem::transmute([u16::MAX; 218]) },
             length: 0,
             captures: 0
         }
