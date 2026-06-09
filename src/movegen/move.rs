@@ -72,6 +72,12 @@ impl Move {
         )})
     }
 
+    /// Returns true if the move is a queen promotion
+    pub fn is_queen_promotion(self) -> bool {
+        const QUEEN_MASK: u16 = 0b11 << Move::FLAG_OFFSET;
+        self.0.get() & QUEEN_MASK == QUEEN_MASK
+    }
+
     /// Creates a Move from a UCI move on a given board. Undefined behaviour
     /// may happen if the move is invalid.
     pub fn from_uci(board: &Board, uci: &str) -> Self {
@@ -190,15 +196,34 @@ impl Move {
         }
     }
 
+    pub fn prom_bonus(self) -> i16 {
+        if !self.is_promotion() {
+            0
+        } else if self.is_queen_promotion() {
+            100
+        } else {
+            -8000
+        }
+    }
+
     /// Scores a move by the given tables
     pub fn score(self, board: &Board, predicted_best: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> i16 {
         if Some(self) == predicted_best {
             return i16::MAX;
         }
+        
+        let prom_bonus = self.prom_bonus();
+        if prom_bonus < 0 {
+            if self.is_capture() {
+                return -10000;
+            } else {
+                return -11000;
+            }
+        }
         if self.is_capture() {
             let see = see_sign(board, self);
             if see < 0 {
-                return see - 10000;
+                return prom_bonus + see - 10000;
             }
             let attacker = board.piece_at(self.source_square());
             let victim = board.piece_at(self.target_square());
@@ -206,11 +231,14 @@ impl Move {
             let victim_score = Move::mvvlva_score(victim);
             let mvv =  victim_score * 10 - attacker_score;
             if see == 0 {
-                return mvv + 9910;
+                return prom_bonus + mvv + 9910;
             } else {
-                return mvv + 10000;
+                return prom_bonus + mvv + 10000;
             }
         }
+        // if self.is_queen_promotion() {
+        //     return 9950;
+        // }
         if Some(self) == killers[0] {
             return 9900;
         }
@@ -220,7 +248,7 @@ impl Move {
         if Some(self) == counter_move {
             return 9800;
         }
-        return history[self.source_square() as usize][self.target_square() as usize];
+        return prom_bonus + history[self.source_square() as usize][self.target_square() as usize];
     }
 }
 
@@ -274,6 +302,15 @@ impl MoveList {
             scores[j] = key_score;
         }
     }
+
+    /// Scores the movelist
+    pub fn scores(&self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> [i16; 218] {
+        let mut scores = [0i16; 218];
+        for i in 0..self.length {
+            scores[i] = self.moves[i].score(board, predicted_best_move, killers, history, counter_move);
+        }
+        scores
+    } 
 
     /// Sorts captures by SEE score descending, leaving quiet moves in place.
     /// Returns the SEE scores parallel to the move list so callers can avoid recomputing.
@@ -375,5 +412,60 @@ impl MoveList {
 
     pub fn iter(&self) -> impl Iterator<Item = Move> + '_ {
         self.moves[..self.length].iter().copied()
+    }
+
+    pub fn lazy_iter(&mut self, board: &Board, predicted_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[i16; 64]; 64], counter_move: Option<Move>) -> LazyMoveIter {
+        let scores = self.scores(board, predicted_best_move, killers, history, counter_move);
+        LazyMoveIter {
+            movelist: self,
+            scores: scores,
+            sorted: 0,
+            current: 0
+        }
+    }
+}
+
+pub struct LazyMoveIter<'a> {
+    movelist: &'a mut MoveList,
+    scores: [i16; 218],
+    sorted: usize,
+    current: usize,
+}
+
+impl<'a> LazyMoveIter<'a> {
+    pub fn reset(&mut self) {
+        self.current = 0;
+    }
+
+    pub fn captures(&self) -> usize {
+        self.movelist.captures
+    }
+}
+
+impl<'a> Iterator for LazyMoveIter<'a> {
+    type Item = Move;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.movelist.length {
+            None
+        } else if self.current < self.sorted {
+            self.current += 1;
+            Some(self.movelist.moves[self.current - 1])
+        } else {
+            let mut best = self.current;
+            for i in (self.current + 1)..self.movelist.length {
+                if self.scores[i] > self.scores[best] {
+                    best = i;
+                }
+            }
+            let tmp = self.movelist.moves[best];
+            self.movelist.moves[best] = self.movelist.moves[self.current];
+            self.movelist.moves[self.current] = tmp;
+            let tmp = self.scores[best];
+            self.scores[best] = self.scores[self.current];
+            self.scores[self.current] = tmp;
+            self.current += 1;
+            self.sorted = self.current;
+            Some(self.movelist.moves[self.current - 1])
+        }
     }
 }

@@ -2,7 +2,7 @@
 Implementation of negamax, used as the main search algorithm.
 */
 
-use crate::{bitboard::{Board, Piece, Square}, eval::{PIECE_VALUE, relative_eval}, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::{Flag, Move, MoveList}}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
+use crate::{bitboard::{Board, Piece, Square}, eval::{PIECE_VALUE, relative_eval}, movegen::{generator::generate_movelist, makemove::{make_move, make_null_move, unmake_move, unmake_null_move}, r#move::{Flag, LazyMoveIter, Move}}, search::{state::SearchState, tt::{TT, TTEntry, TTFlag}}};
 
 const MATE_VAL: i16 = 30000;
 const MATE_CUTOFF: i16 = 29000;
@@ -34,7 +34,13 @@ pub fn search(board: &mut Board, mut max_depth: u8, tt: &mut TT, history: &mut [
     let mut state = SearchState::new_search(tt, history, counter_move);
     let mut best_move = None;
     let mut iteration_score = 0;
-    max_depth += if board.is_pawn_endgame() { 3 } else { 0 };
+    max_depth += match board.phase {
+        0 => 5,
+        1..=4 => 3,
+        5..=9 => 2,
+        10..=13 => 1,
+        _ => 0
+    };
     for depth in 1..=max_depth {
         state.max_depth = depth;
 
@@ -80,13 +86,14 @@ pub fn search_move(board: &mut Board, alpha: i16, beta: i16, depth: u8, ply: u8,
     score
 }
 
-pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &MoveList, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
+pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply: u8, movelist: &mut LazyMoveIter, skip_quiet: bool, skip_tried: bool, previous_move: Option<Move>, state: &mut SearchState) -> (i16, Option<Move>, bool) {
     let mut value = -INF;
     let mut best_move = None;
     let mut moved = false;
     let mut tried_quiets = [Move::new(Flag::QUIET, Square::a2, Square::a2); 218];
     let mut tried_quiets_idx = 0;
-    for (i, mv) in movelist.iter().enumerate() {
+    let captures = movelist.captures();
+    for (i, mv) in movelist.enumerate() {
         if skip_tried && (i == 0 || mv.is_capture()) {
             continue;
         }
@@ -97,7 +104,7 @@ pub fn search_moves(board: &mut Board, mut alpha: i16, beta: i16, depth: u8, ply
         }
         moved = true;
         let score = if board.is_rule_draw() { 0 } else {
-            search_move(board, alpha, beta, depth, ply, i, mv, movelist.captures, state)
+            search_move(board, alpha, beta, depth, ply, i, mv, captures, state)
         };
         unmake_move(board, mv, &unmake);
         if score > value {
@@ -137,7 +144,7 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
         return (quiescence(board, alpha, beta, ply), None);
     }
 
-    if allow_null_move && board.has_non_pawn_pieces() && beta < INF && depth > 3 && !board.in_check(board.side) {
+    if allow_null_move && board.phase > 2 && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
         let null_move_score = -negamax(board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state).0;
         unmake_null_move(board, &unmake);
@@ -151,16 +158,20 @@ pub fn negamax(board: &mut Board, mut alpha: i16, mut beta: i16, depth: u8, ply:
     let original_alpha = alpha;
     let mut skip_quiet = depth == 1 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN < alpha;
     skip_quiet = skip_quiet || depth == 2 && !board.in_check(board.side) && relative_eval(board) + FUTILITY_MARGIN * 3 < alpha;
-    let mut movelist = generate_movelist(board, false);
+    // let mut movelist = generate_movelist(board, false);
     let counter = previous_move.and_then(|pm| state.counter_move[pm.source_square() as usize][pm.target_square() as usize]);
-    movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
+    // movelist.sort(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
+
+    let mut lazymovelist = generate_movelist(board, false);
+    let mut lazy_iter = lazymovelist.lazy_iter(board, predicted_best_move, &state.killers[ply as usize], state.history, counter);
 
     let (mut value, mut best_move, mut moved)
-        = search_moves(board, alpha, beta, depth, ply, &movelist, skip_quiet, false, previous_move, state);
+        = search_moves(board, alpha, beta, depth, ply, &mut lazy_iter, skip_quiet, false, previous_move, state);
     
     if !moved && skip_quiet {
+        lazy_iter.reset();
         (value, best_move, moved)
-            = search_moves(board, alpha, beta, depth, ply, &movelist, false, true, previous_move, state);
+            = search_moves(board, alpha, beta, depth, ply, &mut lazy_iter, false, true, previous_move, state);
     }
 
     if !moved {

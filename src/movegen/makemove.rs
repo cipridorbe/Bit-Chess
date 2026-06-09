@@ -246,10 +246,7 @@ pub fn make_move(board: &mut Board, mv: Move) -> UnmakeInfo {
         board.black_in_check = self_in_check_after;
     }
 
-    // let white_attacks = all_attacks(board, Side::White);
-    // let black_attacks = all_attacks(board, Side::Black);
-    // board.white_in_check = black_attacks & board.pieces[Piece::WhiteKing as usize] != 0; 
-    // board.black_in_check = white_attacks & board.pieces[Piece::BlackKing as usize] != 0; 
+    board.phase = board.calculate_phase();
 
     unmake
 }
@@ -392,6 +389,7 @@ pub struct UnmakeInfo {
     pub(crate) repetitions: u8,
     pub(crate) white_in_check: bool,
     pub(crate) black_in_check: bool,
+    pub(crate) phase: u8,
 }
 
 impl UnmakeInfo {
@@ -410,7 +408,8 @@ impl UnmakeInfo {
             eg_score: board.eg_score,
             repetitions: board.repetitions,
             white_in_check: board.white_in_check,
-            black_in_check: board.black_in_check
+            black_in_check: board.black_in_check,
+            phase: board.phase,
         }
     }
 
@@ -428,6 +427,7 @@ impl UnmakeInfo {
         board.repetitions = self.repetitions;
         board.white_in_check = self.white_in_check;
         board.black_in_check = self.black_in_check;
+        board.phase = self.phase;
     }
 }
 
