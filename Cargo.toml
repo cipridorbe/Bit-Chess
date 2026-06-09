@@ -3,6 +3,9 @@ name = "bitchess"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+assertions = []
+
 [dependencies]
 once_cell = "1.21.4"
 rand = "0.9.4"
