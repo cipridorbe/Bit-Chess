@@ -2,16 +2,14 @@ use std::io::{self, BufRead, Write};
 
 use bitchess::{
     bitboard::Board,
+    game::Game,
     movegen::makemove::make_move,
     movegen::r#move::Move,
-    search::{search, tt::TT},
 };
 
 fn main() {
     let stdin = io::stdin();
-    let mut board = Board::starting_position();
-    let mut tt = TT::new(22, 2);
-    let mut history = Box::new([[0i16; 64]; 64]);
+    let mut game = Game::new();
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
@@ -30,19 +28,19 @@ fn main() {
                 println!("readyok");
             }
             "ucinewgame" => {
-                board = Board::starting_position();
+                game = Game::new();
             }
             "position" => {
                 let mut i = 1;
                 match tokens.get(i).copied() {
                     Some("startpos") => {
-                        board = Board::starting_position();
+                        game.board = Board::starting_position();
                         i += 1;
                     }
                     Some("fen") => {
                         i += 1;
                         let fen = tokens[i..i + 6].join(" ");
-                        board = Board::from_fen(&fen);
+                        game.board = Board::from_fen(&fen);
                         i += 6;
                     }
                     _ => continue,
@@ -50,8 +48,8 @@ fn main() {
                 if tokens.get(i).copied() == Some("moves") {
                     i += 1;
                     for mv_str in &tokens[i..] {
-                        let mv = Move::from_uci(&board, mv_str);
-                        make_move(&mut board, mv);
+                        let mv = Move::from_uci(&game.board, mv_str);
+                        make_move(&mut game.board, mv);
                     }
                 }
             }
@@ -68,7 +66,7 @@ fn main() {
                         i += 1;
                     }
                 }
-                match search(&mut board, depth, &mut tt, &mut history) {
+                match game.find_best_move(depth) {
                     Some(mv) => print!("bestmove {}\n", mv.to_uci()),
                     None => print!("bestmove 0000\n"),
                 }
