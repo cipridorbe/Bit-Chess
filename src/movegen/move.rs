@@ -23,7 +23,7 @@
   1 1 1 1  Queen promotion capture  
 */
 
-use crate::bitboard::{Piece, Square};
+use crate::bitboard::{Board, Piece, Side, Square};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
@@ -72,6 +72,55 @@ impl Move {
             | (target as u32) << Move::TARGET_OFFSET
             | (source as u32) << Move::SOURCE_OFFSET
         )
+    }
+
+    /// Creates a Move from a UCI move on a given board. Undefined behaviour
+    /// may happen if the move is invalid.
+    pub fn from_uci(board: &Board, uci: &str) -> Self {
+        let source = Square::from_fen(&uci[0..2]).unwrap();
+        let target = Square::from_fen(&uci[2..4]).unwrap();
+        let piece = board.piece_at(source).unwrap();
+
+        let mut flag = Flag::QUIET;
+        if board.piece_at(target).is_some() {
+            flag = Flag::CAPTURE;
+        }
+        if piece == Piece::WhiteKing && source == Square::e1 && target == Square::g1 {
+            flag = Flag::KINGCASTLE
+        } else if piece == Piece::WhiteKing && source == Square::e1 && target == Square::c1 {
+            flag = Flag::QUEENCASTLE;
+        } else if piece == Piece::BlackKing && source == Square::e8 && target == Square::g8 {
+            flag = Flag::KINGCASTLE;
+        } else if piece == Piece::BlackKing && source == Square::e8 && target == Square::c8 {
+            flag = Flag::QUEENCASTLE;
+        }
+
+        if piece == Piece::WhitePawn && source.rank() == 1 && target.rank() == 3 {
+            flag = Flag::PAWNPUSH;
+        } else if piece == Piece::BlackPawn && source.rank() == 6 && target.rank() == 4 {
+            flag = Flag::PAWNPUSH;
+        }
+
+        if board.enpassant.is_some() && target == board.enpassant.unwrap()
+            && (piece == Piece::WhitePawn || piece == Piece::BlackPawn) {
+            flag = Flag::ENPASSANT;
+        }
+
+        if uci.len() == 5 {
+            let prom = Piece::from_fen(&uci[4..5]);
+            flag = match prom {
+                Piece::BlackKnight => Flag::KNIGHTPROM,
+                Piece::BlackBishop => Flag::BISHOPPROM,
+                Piece::BlackRook => Flag::ROOKPROM,
+                Piece::BlackQueen => Flag::QUEENPROM,
+                _ => panic!("invalid uci move")
+            };
+            if board.piece_at(target).is_some() {
+                flag = unsafe { std::mem::transmute((flag as u8) | 1 << Flag::CAPTURE_OFFSET) };
+            }
+        }
+
+        Move::new(flag, piece, target, source)
     }
 
     /// Returns the source square of the move
