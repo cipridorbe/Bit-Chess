@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::r#move::Move, repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square}};
+use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::r#move::Move, repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square}, search::state::SearchState};
 
 #[derive(Clone)]
 pub struct Board {
@@ -25,7 +25,7 @@ pub struct Board {
     /// History of all moves
     pub move_history: Vec<Move>,
     /// Additional state information
-    pub state: BoardState
+    pub state: BoardState,
 }
 
 impl Board {
@@ -63,6 +63,29 @@ impl Board {
     /// Whether or not the side not to move is in check
     pub fn other_in_check(&self) -> bool {
         self.attacks(self.colour) & self[Piece::king(!self.colour)] != 0
+    }
+
+    pub fn is_rule_draw(&self) -> bool {
+        if self.state.repetitions >= 3 || self.halfmove_clock >= 100 {
+            return true;
+        }
+        let num_pieces = self.occupied().count_ones();
+        if num_pieces >= 5 {
+            return false;
+        } else if num_pieces <= 2 {
+            return true;
+        } else if num_pieces == 3 {
+            return self.state.phase_unbounded == 1
+        } else {
+            let bishops = self[Piece::WhiteBishop] | self[Piece::BlackBishop];
+            if (bishops & Square::DARK_SQUARES).count_ones() == 2 {
+                return true;
+            }
+            if (bishops & Square::LIGHT_SQUARES).count_ones() == 2 {
+                return true;
+            }
+            return false;
+        }
     }
 
     /// Adds a hash to the current hash history and updates `state.repetitions`,

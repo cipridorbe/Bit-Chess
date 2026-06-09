@@ -1,6 +1,6 @@
-pub mod negamax;
-pub mod tt;
-pub mod state;
-pub mod see;
+pub const MAX_PLY: u8 = 64;
+pub const NUM_THREADS: u8 = 4;
 
-pub use negamax::search;
+pub mod negamax;
+pub mod state;
+pub mod tt;

@@ -1,41 +1,52 @@
-use crate::{movegen::r#move::Move, search::{tt::TT}};
+use std::sync::Arc;
 
-const MAX_HISTORY: i16 = 8192;
+use crate::{eval::Eval, movegen::r#move::Move, search::{MAX_PLY, tt::TT}};
 
-pub struct SearchState<'a> {
-    pub(crate) killers: [[Option<Move>; 2]; 48],
-    pub(crate) tt: &'a TT,
-    pub(crate) history: &'a mut [[i16; 64]; 64],
-    pub(crate) counter_move: &'a mut[[Option<Move>; 64]; 64],
-    pub(crate) max_depth: u8
+pub const MAX_HISTORY_VALUE: Eval = 16384;
+
+#[derive(Clone)]
+pub struct SearchState {
+    pub tt: Arc<TT>,
+    pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
+    pub history: [[Eval; 64]; 64],
+    pub counter_move: [[Option<Move>; 64]; 64],
+    pub node_count: u64,
 }
 
-
-
-impl<'a> SearchState<'a> {
-    pub fn new_search(tt: &'a mut TT, history: &'a mut [[i16; 64];64], counter_move: &'a mut [[Option<Move>; 64]; 64]) -> Self {
-        tt.new_search();
-        for i in 0..64 {
-            for j in 0..64 {
-                history[i][j] /= 2;
-            }
-        }
+impl SearchState {
+    pub fn new(tt_bits: u8, tt_generation_cutoff: u8) -> Self {
         SearchState {
-            killers: [[None; 2]; 48],
-            tt: tt,
-            history: history,
-            counter_move: counter_move,
-            max_depth: 20
+            tt: Arc::new(TT::new(tt_bits, tt_generation_cutoff)),
+            killers: [[None; 2]; MAX_PLY as usize],
+            history: [[0; 64]; 64],
+            counter_move: [[None; 64]; 64],
+            node_count: 0
         }
     }
 
-    pub fn new_helper(tt: &'a TT, history: &'a mut [[i16; 64]; 64], counter_move: &'a mut [[Option<Move>; 64]; 64]) -> Self {
+    pub fn new_search(&mut self) {
+        let tt = Arc::get_mut(&mut self.tt).expect("new_search() called with multiple active TTs");
+        tt.new_search();
+        for i in 1..self.killers.len() {
+            self.killers[i - 1] = self.killers[i]
+        }
+        self.killers[self.killers.len() - 1] = [None, None];
+        for i in 0..64 {
+            for j in 0..64 {
+                self.history[i][j] /= 2;
+            }
+        }
+        self.counter_move = [[None; 64]; 64];
+        self.node_count = 0
+    }
+
+    pub fn new_helper_thread(&self) -> Self {
         SearchState {
-            killers: [[None; 2]; 48],
-            tt,
-            history,
-            counter_move,
-            max_depth: 20,
+            tt: Arc::clone(&self.tt),
+            killers: self.killers.clone(),
+            history: self.history.clone(),
+            counter_move: self.counter_move.clone(),
+            node_count: 0
         }
     }
 
@@ -53,11 +64,11 @@ impl<'a> SearchState<'a> {
         let bonus = (depth * depth) as i16;
         let entry = self.history[mv.source_square() as usize][mv.target_square() as usize];
         self.history[mv.source_square() as usize][mv.target_square() as usize]
-            += bonus - (entry as i32 * bonus as i32 / MAX_HISTORY as i32) as i16;
+            += bonus - (entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
         for quiet in tried_quiets {
             let entry = self.history[quiet.source_square() as usize][quiet.target_square() as usize];
             self.history[quiet.source_square() as usize][quiet.target_square() as usize]
-                += -bonus - (entry as i32 * bonus as i32 / MAX_HISTORY as i32) as i16;
+                += -bonus - (entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
         }
     }
 }

@@ -1,7 +1,7 @@
 use std::ops::{BitXor, BitXorAssign};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct Hash(u64);
+pub struct Hash(pub u64);
 
 impl Hash {
     pub const POSITION_PIECE: [[Hash; 64]; 12] = unsafe { std::mem::transmute([

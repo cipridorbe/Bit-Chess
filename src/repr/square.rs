@@ -16,6 +16,17 @@ pub enum Square {
 }
 
 impl Square {
+    pub const DARK_SQUARES: BB = const {
+        let mut out = 1;
+        out |= out << 2;
+        out |= out << 4;
+        out |= out << 9;
+        out |= out << 16;
+        out |= out << 32;
+        BB::new(out)
+    };
+
+    pub const LIGHT_SQUARES: BB = BB::new(!Square::DARK_SQUARES.0);
 
     /// Iterator over all squares
     pub fn all() -> BBIter {

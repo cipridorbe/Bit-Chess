@@ -220,7 +220,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     unmake_info
 }
 
-fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: &mut MoveList) {
+fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) {
     let colour = board.colour;
 
     let piece = unmake_info.piece;
@@ -240,12 +240,16 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
         board[Piece::pawn(colour)] |= square;
         board[square] = Some(Piece::pawn(colour));
     } else if mv.is_queen_promotion() && mv_score == 0 {
-        if mv.is_capture() {
-            movelist.add_to_end(Move::new(Flag::BISHOPPROMCAP, mv.target_square(), mv.source_square()));
-            movelist.add_to_end(Move::new(Flag::ROOKPROMCAP, mv.target_square(), mv.source_square()));
+        if let Some(movelist) = movelist {
+            if mv.is_capture() {
+                movelist.add_to_end(Move::new(Flag::BISHOPPROMCAP, mv.target_square(), mv.source_square()));
+                movelist.add_to_end(Move::new(Flag::ROOKPROMCAP, mv.target_square(), mv.source_square()));
+            } else {
+                movelist.add_to_end(Move::new(Flag::BISHOPPROM, mv.target_square(), mv.source_square()));
+                movelist.add_to_end(Move::new(Flag::ROOKPROM, mv.target_square(), mv.source_square()));
+            }
         } else {
-            movelist.add_to_end(Move::new(Flag::BISHOPPROM, mv.target_square(), mv.source_square()));
-            movelist.add_to_end(Move::new(Flag::ROOKPROM, mv.target_square(), mv.source_square()));
+            println!("Unmaking queen promotion stalemate didn't add underpromotions");
         }
     }
 
@@ -349,7 +353,7 @@ impl Board {
         makemove(self, mv)
     }
 
-    pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: &mut MoveList) {
+    pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) {
         unmakemove(self, mv, mv_score, unmake_info, movelist);
     }
 

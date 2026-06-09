@@ -14,7 +14,7 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
             } else {
                 let unmake = board.makemove(mv);
                 out += perft(board, depth - 1);
-                board.unmakemove(mv, 0, unmake, &mut movelist);
+                board.unmakemove(mv, 0, unmake, Some(&mut movelist));
             }
         }
         i += 1;
@@ -219,7 +219,7 @@ mod debug {
                 let n = perft(&mut clone, depth - 1);
                 *map.entry(mv.to_uci()).or_insert(0) += n;
             }
-            clone.unmakemove(mv, 0, unmake, &mut movelist);
+            clone.unmakemove(mv, 0, unmake, Some(&mut movelist));
             i += 1;
         }
         map
