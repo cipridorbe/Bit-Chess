@@ -16,6 +16,7 @@ pub enum Square {
 }
 
 impl Square {
+
     /// Iterator over all squares
     pub fn all() -> BBIter {
         BBIter(!BB::new(0)).into_iter()
@@ -74,6 +75,7 @@ impl Square {
     }
 }
 
+/// [Included][Excluded]
 pub static SEGMENT: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
     let mut table = [[BB::new(0); 64]; 64];
     for sq1 in Square::all() {
@@ -93,8 +95,62 @@ pub static SEGMENT: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
                 r += dr.signum();
                 f += df.signum();
             }
-            segment |= sq1;
-            segment |= sq2;
+            segment |= sq1.bb();
+            segment &= !sq2.bb();
+            table[sq1 as usize][sq2 as usize] = segment;
+        }
+    }
+    table
+});
+
+pub static SEGMENT_CARDINAL: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[BB::new(0); 64]; 64];
+    for sq1 in Square::all() {
+        for sq2 in Square::all() {
+            let (r1, f1) = sq1.rank_file();
+            let (r2, f2) = sq2.rank_file();
+            let dr = r1 as i8 - r2 as i8;
+            let df = f1 as i8 - f2 as i8;
+            if !(dr == 0 || df == 0) {
+                continue;
+            }
+            let mut segment = BB::new(0);
+            let (mut r, mut f) = (r2 as i8, f2 as i8);
+            while !(r as u8 == r1 && f as u8 == f1) {
+                let sq = Square::from_rank_file(r as u8, f as u8);
+                segment |= sq;
+                r += dr.signum();
+                f += df.signum();
+            }
+            segment |= sq1.bb();
+            segment &= !sq2.bb();
+            table[sq1 as usize][sq2 as usize] = segment;
+        }
+    }
+    table
+});
+
+pub static SEGMENT_DIAGONAL: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[BB::new(0); 64]; 64];
+    for sq1 in Square::all() {
+        for sq2 in Square::all() {
+            let (r1, f1) = sq1.rank_file();
+            let (r2, f2) = sq2.rank_file();
+            let dr = r1 as i8 - r2 as i8;
+            let df = f1 as i8 - f2 as i8;
+            if !(dr.abs() == df.abs()) {
+                continue;
+            }
+            let mut segment = BB::new(0);
+            let (mut r, mut f) = (r2 as i8, f2 as i8);
+            while !(r as u8 == r1 && f as u8 == f1) {
+                let sq = Square::from_rank_file(r as u8, f as u8);
+                segment |= sq;
+                r += dr.signum();
+                f += df.signum();
+            }
+            segment |= sq1.bb();
+            segment &= !sq2.bb();
             table[sq1 as usize][sq2 as usize] = segment;
         }
     }

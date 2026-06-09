@@ -1,7 +1,7 @@
 use crate::{movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_king_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, r#move::{Flag::{self, CAPTURE}, Move, MoveList}}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::{SEGMENT, Square}}};
 
 /// Creates list of pseudo-legal moves.
-pub fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
+fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     let mut movelist = MoveList::new();
     let colour = board.colour;
     let checkers = board.state.checkers;
@@ -29,6 +29,13 @@ pub fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
                 board[!colour],
                 captures_only
             );
+            if let Some(enpassant) = board.enpassant {
+                if board[checker].unwrap() == Piece::pawn(!colour) {
+                    for pawn in BB::squares(pawn_attacks(enpassant.bb(), !colour) & board[Piece::pawn(colour)]) {
+                        movelist.add(Move::new(Flag::ENPASSANT, enpassant, pawn));
+                    }
+                }
+            }
             return movelist;
         }
         check_segment = SEGMENT[checker as usize][board[Piece::king(colour)].lsb() as usize];
@@ -73,6 +80,12 @@ pub fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     movelist
 }
 
+impl Board {
+    pub fn generate_movelist(&self, captures_only: bool) -> MoveList {
+        generate_movelist(self, captures_only)
+    }
+}
+
 // Does not apply to pawns and castling
 fn generate_piece_movelist(movelist: &mut MoveList, piece: BB, moves: impl Fn(Square) -> BB, avoid: BB, enemy_occupancy: BB, captures_only: bool) {
     for source_square in piece.squares() {
@@ -100,13 +113,13 @@ fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: S
     let rook_attacks = single_rook_attacks(square, board.occupied());
     let bishop_attacks = single_bishop_attacks(square, board.occupied());
     for rook in BB::squares(rook_attacks & board[Piece::rook(colour)]) {
-        movelist.add(Move::new(CAPTURE, rook, square));
+        movelist.add(Move::new(CAPTURE, square, rook));
     }
     for bishop in BB::squares(bishop_attacks & board[Piece::bishop(colour)]) {
-        movelist.add(Move::new(CAPTURE, bishop, square));
+        movelist.add(Move::new(CAPTURE, square, bishop));
     }
     for queen in BB::squares((rook_attacks | bishop_attacks) & board[Piece::queen(colour)]) {
-        movelist.add(Move::new(CAPTURE, queen, square));
+        movelist.add(Move::new(CAPTURE, square, queen));
     }
 }
 
@@ -121,7 +134,7 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
             add_pawn_moves(movelist, attacks_right & board[!colour], 9, Flag::CAPTURE);
             let push = pawns << 8;
             add_pawn_moves(movelist, push & !board.occupied(), 8, Flag::QUIET);
-            let double_push = (push & Board::RANK_3) << 8;
+            let double_push = (push & Board::RANK_3 & !board.occupied()) << 8;
             add_pawn_moves(movelist, double_push & !board.occupied(), 16, Flag::PAWNPUSH);
         },
         Colour::Black => {
@@ -131,7 +144,7 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board) {
             add_pawn_moves(movelist, attacks_right & board[!colour], -7, Flag::CAPTURE);
             let push = pawns >> 8;
             add_pawn_moves(movelist, push & !board.occupied(), -8, Flag::QUIET);
-            let double_push = (push & Board::RANK_6) >> 8;
+            let double_push = (push & Board::RANK_6 & !board.occupied()) >> 8;
             add_pawn_moves(movelist, double_push & !board.occupied(), -16, Flag::PAWNPUSH);
         },
     }
@@ -157,7 +170,7 @@ fn add_pawn_moves(movelist: &mut MoveList, targets: BB, offset: i8, flag: Flag) 
 }
 
 fn generate_castling_movelist(movelist: &mut MoveList, board: &Board, captures_only: bool) {
-    if !captures_only {
+    if captures_only {
         return;
     }
     let colour = board.colour;

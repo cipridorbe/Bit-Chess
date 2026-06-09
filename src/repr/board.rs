@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square};
+use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::r#move::Move, repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square}};
 
 #[derive(Clone)]
 pub struct Board {
@@ -22,6 +22,8 @@ pub struct Board {
     pub halfmove_clock: u8,
     /// History of all board positions
     pub hash_history: Vec<Hash>,
+    /// History of all moves
+    pub move_history: Vec<Move>,
     /// Additional state information
     pub state: BoardState
 }
@@ -39,6 +41,10 @@ impl Board {
     pub const RANK_7: BB = BB::new(0x00ff000000000000);
     pub const RANK_8: BB = BB::new(0xff00000000000000);
 
+    pub fn starting_position() -> Self {
+        Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+    }
+
     /// Bitboard of all occupied squares.
     pub fn occupied(&self) -> BB {
         self.colours[0] | self.colours[1]
@@ -54,16 +60,21 @@ impl Board {
         self.state.checkers != 0
     }
 
+    /// Whether or not the side not to move is in check
+    pub fn other_in_check(&self) -> bool {
+        self.attacks(self.colour) & self[Piece::king(!self.colour)] != 0
+    }
+
     /// Adds a hash to the current hash history and updates `state.repetitions`,
     /// assuming `halfmove_clock` and `total_halfmoves` have been updated to match the current move
     pub fn add_hash_to_history(&mut self, hash: Hash) {
         self.hash_history.push(hash);
         self.state.repetitions = 1;
         if self.halfmove_clock >= 4 {
-            let mut idx = self.hash_history.len() as i8 - 2;
-            let end = self.hash_history.len()  as i8 - self.halfmove_clock as i8;
-            while idx >= end {
-                if self.hash_history[idx as usize] == hash {
+            let mut idx = self.hash_history.len() as i16 - 2;
+            let end = self.hash_history.len()  as i16 - self.halfmove_clock as i16;
+            while idx >= end && idx >= 0{
+                if self.hash_history [idx as usize] == hash {
                     self.state.repetitions += 1;
                 }
                 idx -= 2;
@@ -82,6 +93,7 @@ impl Board {
             fullmoves: 0,
             halfmove_clock: 0,
             hash_history: Vec::new(),
+            move_history: Vec::new(),
             state: BoardState {
                 hash: unsafe { std::mem::transmute(0u64) },
                 attacks: [[BB::new(0); 2]; 2],
@@ -89,7 +101,7 @@ impl Board {
                 mg_eval: 0,
                 eg_eval: 0,
                 repetitions: 0,
-                phase_unbounded: 0
+                phase_unbounded: 0,
             } 
         }
     }
@@ -166,6 +178,9 @@ impl Board {
                 out[piece.colour()] |= square;
                 out.state.hash ^= Hash::POSITION_PIECE[piece as usize][square as usize];
                 out.state.phase_unbounded += piece.phase_value();
+                out.state.mg_eval += PIECE_VALUE_MG[piece as usize] + PST_MG[piece as usize][square as usize];
+                out.state.eg_eval += PIECE_VALUE_EG[piece as usize] + PST_EG[piece as usize][square as usize];
+                file += 1;
             }
         }
         out.colour = Colour::from_fen(parts[1]);
@@ -191,8 +206,7 @@ impl Board {
         if (out.attacks(out.colour) & out[Piece::king(!out.colour)]) != 0 {
             panic!("Side not to move cannot be in check");
         }
-
-        unimplemented!()
+        out
     }
 }
 
@@ -241,16 +255,16 @@ impl IndexMut<Square> for Board {
 pub struct BoardState {
     /// Zobrist hash of the position
     pub hash: Hash,
-    /// Indexed as attacks[colour][leaper/slider]
+    /// Indexed as `attacks[colour][piece_type]`
     pub attacks: [[BB; 2]; 2],
     /// Bitboard of source squares of pieces checking the current side to move
     pub checkers: BB,
     /// middle game static evaluation of the position 
-    pub mg_eval: i16,
+    pub mg_eval: Eval,
     /// end game static evaluation of the position
-    pub eg_eval: i16,
+    pub eg_eval: Eval,
     /// How many times this position has appeared before
     pub repetitions: u8,
     /// The phase of the game, between 0 and 24
-    pub phase_unbounded: u8
+    pub phase_unbounded: u8,
 }

@@ -24,7 +24,7 @@
 
 use std::{num::NonZeroU16, ops::{Index, IndexMut}};
 
-use crate::{repr::{board::Board, piece::Piece, square::Square}, test_assert};
+use crate::{repr::{board::Board, colour::Colour, piece::Piece, square::Square}, test_assert};
 
 /// Maximum number of moves that can be made from any position
 pub const MAX_MOVES: usize = 218;
@@ -68,6 +68,13 @@ impl Move {
 
     const fn new_invalid() -> Self {
         unsafe { std::mem::transmute(0xffffu16) }
+    }
+
+    pub fn promoted_piece(self, colour: Colour) -> Piece {
+        test_assert!(self.is_promotion());
+        let bits = (self.0.get() >> Move::FLAG_OFFSET) & 0b11;
+        let piece = (bits as u8 + 1) + (colour as u8 * 6);
+        unsafe { std::mem::transmute(piece) }
     }
 
     pub fn into_queen_prom(self) -> Self {
@@ -210,6 +217,14 @@ impl MoveList {
             self.captures += 1;
         }
         self.length += 1;
+    }
+
+    pub fn add_to_end(&mut self, mv: Move) {
+        self.moves[self.length] = mv;
+        self.length += 1;
+        if mv.is_capture() {
+            self.captures += 1;
+        }
     }
 }
 

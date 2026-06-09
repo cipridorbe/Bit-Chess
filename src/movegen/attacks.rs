@@ -96,12 +96,12 @@ impl Board {
         match (colour, piece_type) {
             (Colour::White, PieceType::Leaper) => {
                 pawn_attacks(self[Piece::WhitePawn], Colour::White)
-                | knight_attacks(self[Piece::WhiteKing])
+                | knight_attacks(self[Piece::WhiteKnight])
                 | king_attacks(self[Piece::WhiteKing])
             },
             (Colour::Black, PieceType::Leaper) => {
                 pawn_attacks(self[Piece::BlackPawn], Colour::Black)
-                | knight_attacks(self[Piece::BlackKing])
+                | knight_attacks(self[Piece::BlackKnight])
                 | king_attacks(self[Piece::BlackKing])
             },
             (Colour::White, PieceType::Slider) => {
