@@ -108,7 +108,7 @@ mod tests {
         let start = Instant::now();
         for &fen in POSITIONS {
             let mut board = Board::from_fen(fen);
-            for i in 0..iters {
+            for _ in 0..iters {
                 if let Some(mv) = search(&mut board, depth, &mut tt, &mut history) {
                     make_move(&mut board, mv);
                 }
@@ -149,7 +149,7 @@ mod tests {
     fn node_count() {
         use crate::search::negamax::NODE_COUNT;
         use crate::movegen::makemove::make_move;
-        let depth = 8;
+        let depth = 9;
         let iters = 7;
         // let mut tt = TT::new_disabled();
         let mut tt = TT::new(22, 2);

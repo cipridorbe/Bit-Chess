@@ -17,6 +17,7 @@ COMMITS=(
     "c9b9c77  v07_2000elo"
     "785e3de  v08_score_tracking"
     "29007c1  v09_pawn_king_eval"
+    "60fea6b  v10_pvs_mate"
 )
 
 CURRENT_REF=$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse HEAD)

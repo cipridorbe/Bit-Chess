@@ -29,12 +29,11 @@ pub fn lsb(number: u64) -> u64 {
     number & (!number + 1)
 }
 
-/// Returns the index of the least significant bit of the given number
-/// Returns 0 if given 0
+/// Returns the index of the least significant bit of the given number.
+/// Returns 0 if given 0.
 #[inline]
 pub fn lsb_index(number: u64) -> u8 {
-    // Get only the last bit and send it to the pow2 method
-    lsb_index_pow2(lsb(number))
+    number.trailing_zeros() as u8
 }
 
 // Used for the method below
@@ -59,14 +58,14 @@ pub fn lsb_index_pow2(power_of_2: u64) -> u8 {
 pub struct LSBIndexIter(u64);
 impl Iterator for LSBIndexIter {
     type Item = Square;
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if self.0 == 0 {
             None
         } else {
-            let lsb_bit = lsb(self.0 as u64);
-            let out = lsb_index_pow2(lsb_bit);
-            self.0 ^= lsb_bit;
-            Some(unsafe { std::mem::transmute(out) })
+            let idx = self.0.trailing_zeros() as u8;
+            self.0 &= self.0 - 1;  // clear LSB
+            Some(unsafe { std::mem::transmute(idx) })
         }
     }
 }

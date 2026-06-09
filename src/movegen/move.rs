@@ -24,7 +24,7 @@
 
 use std::num::NonZeroU16;
 
-use crate::bitboard::{Board, Piece, Side, Square};
+use crate::bitboard::{Board, Piece, Square};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flag {

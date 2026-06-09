@@ -3,7 +3,7 @@
  pieces can attack.
 */
 
-use crate::{bitboard::{Board, Piece, Side, Square}, movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, KING_ATTACKS, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK}, util::{lsb_index_pow2, squares}};
+use crate::{bitboard::{Board, Piece, Side, Square}, movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, KING_ATTACKS, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK}, util::{lsb_index, squares}};
 
 /// Returns the bitboards of squares attacked by the pawns of the given side
 pub fn pawn_attacks(pawns: u64, side: Side) -> u64 {
@@ -34,7 +34,7 @@ pub fn knight_attacks(knights: u64) -> u64 {
 
 /// Returns the bitboards of squares attacked by the given king
 pub fn king_attacks(king: u64) -> u64 {
-    KING_ATTACKS[lsb_index_pow2(king) as usize]
+    KING_ATTACKS[lsb_index(king) as usize]
 }
 
 /// Returns the squares that are attacked by at least one rook

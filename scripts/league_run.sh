@@ -23,6 +23,7 @@ VERSION_DEPTH["v06_tt_memory"]=6
 VERSION_DEPTH["v07_2000elo"]=6
 VERSION_DEPTH["v08_score_tracking"]=7
 VERSION_DEPTH["v09_pawn_king_eval"]=8
+VERSION_DEPTH["v10_pvs_mate"]=8
 
 while getopts "g:" opt; do
     case "$opt" in

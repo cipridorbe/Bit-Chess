@@ -18,7 +18,7 @@ Square representation of bitboard.
 Note that rank and files are both 0-indexed.
 */
 
-use crate::{eval::{eg_eval, mg_eval}, movegen::{attacks::{all_attacks, is_in_check}, r#move::Move}, util::squares};
+use crate::{eval::{eg_eval, mg_eval}, movegen::{attacks::{all_attacks}, r#move::Move}, util::squares};
 
 /// Square indices on bitboards.
 /// For example 1 << Square::a1 is the mask for the a1 square. 
