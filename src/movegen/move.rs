@@ -206,7 +206,21 @@ impl MoveList {
     }
 
     /// Sorts the movelist by mvv-lva
-    pub fn sort_mvvlva(&mut self, board: &Board) {
+    pub fn sort_mvvlva(&mut self, board: &Board, predicted_best_move: Option<Move>) {
+        let mut start_idx = 0;
+        if let Some(mv) = predicted_best_move {
+            if let Some(idx) = self.moves[..self.length].iter().position(|&m| m == mv) {
+                start_idx = 1;
+                if mv.is_capture() {
+                    self.moves[idx] = self.moves[0];
+                    self.moves[0] = mv;
+                } else {
+                    self.moves[idx] = self.moves[self.captures];
+                    self.moves[self.captures] = self.moves[0];
+                    self.moves[0] = mv;
+                }
+            }
+        }
         let piece_value = |p: Piece| -> i32 {
             match p {
                 Piece::WhitePawn   | Piece::BlackPawn   => 1,
@@ -229,11 +243,11 @@ impl MoveList {
         };
 
         // insertion sort descending on moves[0..self.captures]
-        for i in 1..self.captures {
+        for i in (start_idx + 1)..self.captures {
             let key = self.moves[i];
             let key_score = score(key);
             let mut j = i;
-            while j > 0 && score(self.moves[j - 1]) < key_score {
+            while j > start_idx && score(self.moves[j - 1]) < key_score {
                 self.moves[j] = self.moves[j - 1];
                 j -= 1;
             }
