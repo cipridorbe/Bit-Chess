@@ -107,7 +107,7 @@ pub fn eval(board: &Board) -> i16 {
 /// Evaluates the given position with respect to the current player. If the
 /// current player is winning it is positive, otherwise negative
 pub fn relative_eval(board: &Board) -> i16 {
-    let eval = eval(board);
+    let eval = board.score;
     match board.side {
         Side::White => eval,
         Side::Black => -eval

@@ -18,7 +18,7 @@ Square representation of bitboard.
 Note that rank and files are both 0-indexed.
 */
 
-use crate::{movegen::r#move::Move, util::squares};
+use crate::{eval::eval, movegen::r#move::Move, util::squares};
 
 /// Square indices on bitboards.
 /// For example 1 << Square::a1 is the mask for the a1 square. 
@@ -299,7 +299,13 @@ pub struct Board {
     pub(crate) hash: u64,
 
     /// The hash history
-    pub(crate) history: HashHistory
+    pub(crate) history: HashHistory,
+
+    /// The absolute score of the board. Positive = white wins, Negative = black win.
+    pub(crate) score: i16,
+
+    /// The number of times the current move appears in the search history
+    pub(crate) repetitions: u8
 }
 
 impl Board {
@@ -345,20 +351,7 @@ impl Board {
         if self.halfmoves >= 50 {
             return true;
         }
-        if self.history.hashes.len() - self.history.start_idx < 6 {
-            return false;
-        }
-        let mut found = false;
-        let hash = self.history.hashes[self.history.hashes.len() - 1];
-        for i in self.history.start_idx..(self.history.hashes.len() - 1) {
-            if self.history.hashes[i] == hash {
-                if found {
-                    return true;
-                }
-                found = true;
-            }
-        }
-        false
+        return self.repetitions >= 3;
     }
 
     /// Converts the current board to an array of `Option<Piece>`
@@ -543,7 +536,9 @@ impl Board {
         let mut history = HashHistory::new();
         history.hashes.push(hash);
 
-        Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history }
+        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1 };
+        b.score = eval(&b);
+        b
     }
 }
 
@@ -596,12 +591,22 @@ impl HashHistory {
         }
     }
     
-    /// Adds a hash to the history
-    pub fn add(&mut self, hash: u64, mv: Move, piece: Piece) {
+    /// Adds a hash to the history and returns the number of times the move
+    /// repeats (including current)
+    pub fn add(&mut self, hash: u64, mv: Move, piece: Piece) -> u8 {
         self.hashes.push(hash);
         if mv.is_capture() || piece == Piece::WhitePawn || piece == Piece::BlackPawn {
             self.start_idx = self.hashes.len() - 1;
         }
+        let mut i = self.hashes.len() as i32 - 3;
+        let mut repeats = 1;
+        while i >= self.start_idx as i32 {
+            if self.hashes[i as usize] == hash {
+                repeats += 1;
+            }
+            i -= 2;
+        }
+        return repeats;
     }
 
     /// Removes the last move
