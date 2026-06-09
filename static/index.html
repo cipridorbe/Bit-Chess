@@ -49,7 +49,6 @@
 
     .file-labels {
       display: flex;
-      /* left offset = rank-labels width + gap */
       margin-left: calc(18px + 6px);
       width: min(80vmin, 560px);
     }
@@ -96,7 +95,6 @@
     .sq.last-from  { background: rgba(255,215,0,0.40) !important; }
     .sq.last-to    { background: rgba(255,215,0,0.60) !important; }
 
-    /* legal move: dot for empty square */
     .sq.legal-empty::after {
       content: '';
       position: absolute;
@@ -106,7 +104,6 @@
       background: rgba(0,0,0,0.18);
       pointer-events: none;
     }
-    /* legal move: ring for occupied square */
     .sq.legal-capture::after {
       content: '';
       position: absolute;
@@ -136,7 +133,7 @@
     }
     .btn:hover { background: #e8c84a; }
 
-    /* ── Promotion modal ──────────────────────────────── */
+    /* ── Modals ───────────────────────────────────────── */
     .modal-overlay {
       display: none;
       position: fixed;
@@ -158,19 +155,32 @@
       gap: 16px;
     }
     .modal p { color: #ccc; font-size: 1rem; }
+
+    /* Promotion */
     .promo-choices { display: flex; gap: 10px; }
     .promo-btn {
-      width: 76px;
-      height: 76px;
-      cursor: pointer;
-      padding: 6px;
-      border-radius: 8px;
-      border: 2px solid transparent;
+      width: 76px; height: 76px;
+      cursor: pointer; padding: 6px;
+      border-radius: 8px; border: 2px solid transparent;
       background: rgba(255,255,255,0.06);
       transition: background 0.1s, border-color 0.1s;
     }
     .promo-btn img { width: 100%; height: 100%; }
     .promo-btn:hover { background: rgba(255,255,255,0.15); border-color: #d4af37; }
+
+    /* Side selection */
+    .side-choices { display: flex; gap: 16px; }
+    .side-btn {
+      width: 110px; height: 110px;
+      cursor: pointer; padding: 12px;
+      border-radius: 10px; border: 2px solid transparent;
+      background: rgba(255,255,255,0.06);
+      color: #d4af37; font-size: 0.95rem; font-weight: 700;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      transition: background 0.1s, border-color 0.1s;
+    }
+    .side-btn img { width: 56px; height: 56px; }
+    .side-btn:hover { background: rgba(255,255,255,0.15); border-color: #d4af37; }
   </style>
 </head>
 <body>
@@ -187,6 +197,7 @@
     <button class="btn" onclick="newGame()">New Game</button>
   </div>
 
+  <!-- Promotion modal -->
   <div class="modal-overlay" id="promo-overlay">
     <div class="modal">
       <p>Choose promotion piece</p>
@@ -194,11 +205,27 @@
     </div>
   </div>
 
+  <!-- Side selection modal -->
+  <div class="modal-overlay show" id="side-overlay">
+    <div class="modal">
+      <p>Choose your side</p>
+      <div class="side-choices">
+        <button class="side-btn" onclick="startGame('w')">
+          <img src="https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/wK.svg" alt="White king">
+          White
+        </button>
+        <button class="side-btn" onclick="startGame('b')">
+          <img src="https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/bK.svg" alt="Black king">
+          Black
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const FILES = ['a','b','c','d','e','f','g','h'];
     const RANKS = ['1','2','3','4','5','6','7','8'];
 
-    // Lichess cburnett SVG set via jsDelivr CDN
     const PIECE_BASE = 'https://cdn.jsdelivr.net/gh/lichess-org/lila@master/public/piece/cburnett/';
     const PIECE_FILE = {
       'P':'wP','N':'wN','B':'wB','R':'wR','Q':'wQ','K':'wK',
@@ -206,31 +233,36 @@
     };
     const pieceUrl = f => PIECE_BASE + PIECE_FILE[f] + '.svg';
 
-    // [UCI char, image key] for each promotion option
     const PROMO_W = [['q','wQ'],['r','wR'],['b','wB'],['n','wN']];
     const PROMO_B = [['q','bQ'],['r','bR'],['b','bB'],['n','bN']];
 
     let state        = null;
-    let selected     = null;   // square string e.g. "e2"
-    let selectedMoves = [];    // legal moves starting from `selected`
-    let lastMove     = null;   // { from, to }
-    let pendingPromo = null;   // { from, to }
+    let selected     = null;
+    let selectedMoves = [];
+    let lastMove     = null;
+    let pendingPromo = null;
+    let botThinking  = false;
 
     // ── Coordinate labels ──────────────────────────────
     function buildCoords() {
+      const flipped = state?.player_side === 'b';
       const rl = document.getElementById('rank-labels');
       const fl = document.getElementById('file-labels');
       rl.innerHTML = fl.innerHTML = '';
-      for (let r = 7; r >= 0; r--) {
+
+      const ranks = flipped ? ['1','2','3','4','5','6','7','8'] : ['8','7','6','5','4','3','2','1'];
+      const files = flipped ? ['h','g','f','e','d','c','b','a'] : ['a','b','c','d','e','f','g','h'];
+
+      for (const r of ranks) {
         const d = document.createElement('div');
         d.className = 'rank-label';
-        d.textContent = RANKS[r];
+        d.textContent = r;
         rl.appendChild(d);
       }
-      for (let f = 0; f < 8; f++) {
+      for (const f of files) {
         const d = document.createElement('div');
         d.className = 'file-label';
-        d.textContent = FILES[f];
+        d.textContent = f;
         fl.appendChild(d);
       }
     }
@@ -250,17 +282,21 @@
     }
 
     // ── Board rendering ────────────────────────────────
-    function renderBoard() {
+    function renderBoard(piecesOverride = null) {
       const boardEl = document.getElementById('board');
       boardEl.innerHTML = '';
       if (!state) return;
 
-      const pieces  = fenToMap(state.fen);
+      const flipped = state.player_side === 'b';
+      const pieces  = piecesOverride ?? fenToMap(state.fen);
       const side    = state.fen.split(' ')[1];
       const targets = new Set(selectedMoves.map(m => m.slice(2, 4)));
 
-      for (let r = 7; r >= 0; r--) {
-        for (let f = 0; f < 8; f++) {
+      const rankOrder = flipped ? [0,1,2,3,4,5,6,7] : [7,6,5,4,3,2,1,0];
+      const fileOrder = flipped ? [7,6,5,4,3,2,1,0] : [0,1,2,3,4,5,6,7];
+
+      for (const r of rankOrder) {
+        for (const f of fileOrder) {
           const sq    = FILES[f] + RANKS[r];
           const light = (f + r) % 2 !== 0;
           const piece = pieces[sq];
@@ -275,7 +311,7 @@
             div.appendChild(img);
           }
 
-          if (sq === selected)      div.classList.add('selected');
+          if (sq === selected)       div.classList.add('selected');
           if (lastMove?.from === sq) div.classList.add('last-from');
           if (lastMove?.to   === sq) div.classList.add('last-to');
           if (targets.has(sq))       div.classList.add(piece ? 'legal-capture' : 'legal-empty');
@@ -288,7 +324,8 @@
 
     // ── Interaction ────────────────────────────────────
     function onSquareClick(sq, pieces, side) {
-      if (state.game_over) return;
+      if (state.game_over || botThinking) return;
+      if (side !== state.player_side) return;
 
       const piece = pieces[sq];
       const isMyPiece = piece && (
@@ -321,14 +358,33 @@
     }
 
     async function submitMove(uci) {
-      lastMove = { from: uci.slice(0, 2), to: uci.slice(2, 4) };
+      const from = uci.slice(0, 2);
+      const to   = uci.slice(2, 4);
+      lastMove = { from, to };
       selected = null; selectedMoves = [];
+      botThinking = true;
+      document.getElementById('status').textContent = 'Thinking…';
+
+      // Show player's move immediately without waiting for the server
+      const optimistic = fenToMap(state.fen);
+      const side = state.fen.split(' ')[1];
+      let piece = optimistic[from];
+      delete optimistic[from];
+      if (uci.length === 5) {
+        const p = uci[4];
+        piece = side === 'w' ? p.toUpperCase() : p;
+      }
+      optimistic[to] = piece;
+      renderBoard(optimistic);
+
       const res = await fetch('/api/move', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uci }),
       });
       state = await res.json();
+      botThinking = false;
+      buildCoords();
       updateStatus();
       renderBoard();
     }
@@ -357,33 +413,44 @@
       document.getElementById('promo-overlay').classList.add('show');
     }
 
-    // ── Status & new game ──────────────────────────────
+    // ── Status ─────────────────────────────────────────
     function updateStatus() {
       const el = document.getElementById('status');
       if (!state) { el.textContent = 'Loading…'; return; }
-      if (state.game_over) {
-        el.textContent = state.status_message;
-      } else {
-        const side = state.fen.split(' ')[1];
-        el.textContent = side === 'w' ? 'White to move' : 'Black to move';
-      }
+      if (state.game_over) { el.textContent = state.status_message; return; }
+      const side = state.fen.split(' ')[1];
+      const color = side === 'w' ? 'White' : 'Black';
+      const whose = side === state.player_side ? 'your turn' : 'bot';
+      el.textContent = `${color} to move — ${whose}`;
     }
 
-    async function newGame() {
-      await fetch('/api/new', { method: 'POST' });
+    // ── New game / side selection ──────────────────────
+    function newGame() {
+      document.getElementById('side-overlay').classList.add('show');
+    }
+
+    async function startGame(side) {
+      document.getElementById('side-overlay').classList.remove('show');
       lastMove = null; selected = null; selectedMoves = [];
-      const res = await fetch('/api/state');
+      document.getElementById('status').textContent = 'Thinking…';
+
+      const res = await fetch('/api/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ side }),
+      });
       state = await res.json();
+      buildCoords();
       updateStatus();
       renderBoard();
     }
 
     async function init() {
-      buildCoords();
       const res = await fetch('/api/state');
       state = await res.json();
-      updateStatus();
-      renderBoard();
+      buildCoords();
+      // Show side selection on first load
+      document.getElementById('side-overlay').classList.add('show');
     }
 
     init();

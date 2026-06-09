@@ -15,9 +15,15 @@ use crate::{
         makemove::{is_in_check_after_move, make_move},
         r#move::Move,
     },
+    search::search,
 };
 
-type SharedBoard = Arc<Mutex<Board>>;
+struct AppState {
+    board: Board,
+    player_side: Side,
+}
+
+type SharedState = Arc<Mutex<AppState>>;
 
 #[derive(Serialize)]
 struct GameState {
@@ -25,6 +31,7 @@ struct GameState {
     legal_moves: Vec<String>,
     game_over: bool,
     status_message: String,
+    player_side: String,
 }
 
 #[derive(Deserialize)]
@@ -32,22 +39,35 @@ struct MoveRequest {
     uci: String,
 }
 
-async fn get_state(State(board): State<SharedBoard>) -> Json<GameState> {
-    let board = board.lock().unwrap();
-    Json(compute_state(&board))
+#[derive(Deserialize)]
+struct NewGameRequest {
+    side: String,
+}
+
+async fn get_state(State(state): State<SharedState>) -> Json<GameState> {
+    let state = state.lock().unwrap();
+    Json(compute_state(&state.board, state.player_side))
 }
 
 async fn post_move(
-    State(board): State<SharedBoard>,
+    State(state): State<SharedState>,
     Json(req): Json<MoveRequest>,
 ) -> Json<GameState> {
-    let mut board = board.lock().unwrap();
-    let mv = Move::from_uci(&board, &req.uci);
-    make_move(&mut board, mv);
-    Json(compute_state(&board))
+    let mut state = state.lock().unwrap();
+    let mv = Move::from_uci(&state.board, &req.uci);
+    make_move(&mut state.board, mv);
+
+    // Run bot if it's its turn (search returns None when no legal moves)
+    if state.board.side != state.player_side {
+        if let Some(bot_mv) = search(&state.board) {
+            make_move(&mut state.board, bot_mv);
+        }
+    }
+
+    Json(compute_state(&state.board, state.player_side))
 }
 
-fn compute_state(board: &Board) -> GameState {
+fn compute_state(board: &Board, player_side: Side) -> GameState {
     let fen = board.to_fen();
     let pseudo_legal = generate_movelist(board);
     let legal_moves: Vec<String> = pseudo_legal
@@ -74,23 +94,40 @@ fn compute_state(board: &Board) -> GameState {
         String::new()
     };
 
-    GameState { fen, legal_moves, game_over, status_message }
+    let player_side = if player_side == Side::White { "w" } else { "b" }.to_string();
+    GameState { fen, legal_moves, game_over, status_message, player_side }
 }
 
-async fn new_game(State(board): State<SharedBoard>) -> Json<GameState> {
-    let mut board = board.lock().unwrap();
-    *board = Board::starting_position();
-    Json(compute_state(&board))
+async fn new_game(
+    State(state): State<SharedState>,
+    Json(req): Json<NewGameRequest>,
+) -> Json<GameState> {
+    let mut state = state.lock().unwrap();
+    state.board = Board::starting_position();
+    state.player_side = if req.side == "w" { Side::White } else { Side::Black };
+
+    // If player chose black, bot plays first as white
+    if state.player_side == Side::Black {
+        if let Some(bot_mv) = search(&state.board) {
+            make_move(&mut state.board, bot_mv);
+        }
+    }
+
+    Json(compute_state(&state.board, state.player_side))
 }
 
 pub async fn run() {
-    let board = Arc::new(Mutex::new(Board::starting_position()));
+    let state = Arc::new(Mutex::new(AppState {
+        board: Board::starting_position(),
+        player_side: Side::White,
+    }));
+
     let app = Router::new()
         .route("/", get(serve_html))
         .route("/api/state", get(get_state))
         .route("/api/move", post(post_move))
         .route("/api/new", post(new_game))
-        .with_state(board);
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Bitchess running at http://localhost:3000");

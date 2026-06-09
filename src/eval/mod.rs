@@ -1,5 +1,5 @@
 use once_cell::sync::Lazy;
-use crate::{bitboard::{Board, Piece}, util::squares};
+use crate::{bitboard::{Board, Piece, Side}, util::squares};
 
 pub const PIECE_VALUE: [f32; 12] = [
     01., 03., 03., 05., 09., 0.,
@@ -97,8 +97,21 @@ pub static PST: Lazy<[[i32; 64]; 12]> = Lazy::new(|| {
     pst
 });
 
+/// Evaluates the given position absolutely. Positions good for white are
+/// positive and positions good for black are negative, regardless of whose
+/// turn it is.
 pub fn eval(board: &Board) -> f32 {
     piece_eval(board) + piece_position_bonus(board)
+}
+
+/// Evaluates the given position with respect to the current player. If the
+/// current player is winning it is positive, otherwise negative
+pub fn relative_eval(board: &Board) -> f32 {
+    let eval = eval(board);
+    match board.side {
+        Side::White => eval,
+        Side::Black => -eval
+    }
 }
 
 /// Evaluates a board state using only piece values
