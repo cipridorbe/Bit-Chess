@@ -188,7 +188,8 @@ impl Move {
         self.0.get() & (1 << Move::PROMOTION_OFFSET) != 0
     }
 
-    pub fn score(self, board: &Board, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], counter_move: Option<Move>) -> MoveScore {
+    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], counter_move: Option<Move>) -> MoveScore {
+        if Some(self) == tt_move { return TTSCORE; }
         if Some(self) == killers[0] { return KILLERS_SCORE[0]; }
         if Some(self) == killers[1] { return KILLERS_SCORE[1]; }
         if Some(self) == counter_move { return COUNTERMOVE_SCORE; }
@@ -248,7 +249,7 @@ impl MoveList {
         }
     }
 
-    pub fn score(&mut self, board: &Board, search_state: &SearchState, exclude_move: Option<Move>, ply: u8) -> [Eval; 218] {
+    pub fn score(&self, board: &Board, search_state: &SearchState, tt_move: Option<Move>, ply: u8) -> [Eval; 218] {
         let mut out = [0; 218];
         let mut i = 0;
         let killers = &search_state.killers[ply as usize];
@@ -256,21 +257,26 @@ impl MoveList {
             search_state.counter_move[prev.source_square() as usize][prev.target_square() as usize]
         );
         while i < self.length {
-            if Some(self[i]) == exclude_move {
-                self.length -= 1;
-                self[i] = self[self.length];
-                continue;
-            }
-            out[i] = self[i].score(board, killers, &search_state.history, counter_move);
+            out[i] = self[i].score(board, tt_move, killers, &search_state.history, counter_move);
             i += 1;
         }
         out
     }
 
-    pub fn sort(&mut self, scores: &[MoveScore; 218]) {
+    pub fn sort(&mut self, scores: &mut [MoveScore; 218]) {
         for i in 1..self.length {
             let mv = self[i];
             let score = scores[i];
+            let mut j = i;
+            while j > 0 {
+                if scores[j - 1] < score {
+                    self[j] = self[j - 1];
+                    scores[j] = scores[j - 1];
+                }
+                j -= 1;
+            }
+            self[j] = mv;
+            scores[j] = score;
         }
     }
 }

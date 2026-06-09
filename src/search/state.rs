@@ -8,6 +8,7 @@ pub struct SearchState {
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
     pub history: [[MoveScore; 64]; 64],
     pub counter_move: [[Option<Move>; 64]; 64],
+    pub max_depth: u8,
     pub node_count: u64,
 }
 
@@ -18,6 +19,7 @@ impl SearchState {
             killers: [[None; 2]; MAX_PLY as usize],
             history: [[0; 64]; 64],
             counter_move: [[None; 64]; 64],
+            max_depth: 0,
             node_count: 0
         }
     }
@@ -44,6 +46,7 @@ impl SearchState {
             killers: self.killers.clone(),
             history: self.history.clone(),
             counter_move: self.counter_move.clone(),
+            max_depth: self.max_depth,
             node_count: 0
         }
     }
