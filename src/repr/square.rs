@@ -1,4 +1,6 @@
-use crate::{repr::bitboard::BB, test_assert};
+use once_cell::sync::Lazy;
+
+use crate::{repr::bitboard::{BB, BBIter}, test_assert};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -14,6 +16,11 @@ pub enum Square {
 }
 
 impl Square {
+    /// Iterator over all squares
+    pub fn all() -> BBIter {
+        BBIter(!BB::new(0)).into_iter()
+    }
+
     /// Converts the given u8 to a Square
     pub fn from_u8(square: u8) -> Self {
         test_assert!(square < 64);
@@ -40,6 +47,11 @@ impl Square {
         self as u8 % 8
     }
 
+    /// Returns the rank and file, 0-indexed
+    pub fn rank_file(self) -> (u8, u8) {
+        (self.rank(), self.file())
+    }
+
     pub fn to_fen(self) -> String {
         let files = ["a", "b", "c", "d", "e", "f", "g", "h"];
         let ranks = ["1", "2", "3", "4", "5", "6", "7", "8"];
@@ -61,3 +73,30 @@ impl Square {
         Some(Square::from_rank_file(rank, file))
     }
 }
+
+pub static SEGMENT: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[BB::new(0); 64]; 64];
+    for sq1 in Square::all() {
+        for sq2 in Square::all() {
+            let (r1, f1) = sq1.rank_file();
+            let (r2, f2) = sq2.rank_file();
+            let dr = r1 as i8 - r2 as i8;
+            let df = f1 as i8 - f2 as i8;
+            if !(dr == 0 || df == 0 || dr.abs() == df.abs()) {
+                continue;
+            }
+            let mut segment = BB::new(0);
+            let (mut r, mut f) = (r2 as i8, f2 as i8);
+            while !(r as u8 == r1 && f as u8 == f1) {
+                let sq = Square::from_rank_file(r as u8, f as u8);
+                segment |= sq;
+                r += dr.signum();
+                f += df.signum();
+            }
+            segment |= sq1;
+            segment |= sq2;
+            table[sq1 as usize][sq2 as usize] = segment;
+        }
+    }
+    table
+});

@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::Piece, square::Square};
+use crate::repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square};
 
 #[derive(Clone)]
 pub struct Board {
@@ -34,6 +34,8 @@ impl Board {
 
     pub const RANK_1: BB = BB::new(0x00000000000000ff);
     pub const RANK_2: BB = BB::new(0x000000000000ff00);
+    pub const RANK_3: BB = BB::new(0x0000000000ff0000);
+    pub const RANK_6: BB = BB::new(0x0000ff0000000000);
     pub const RANK_7: BB = BB::new(0x00ff000000000000);
     pub const RANK_8: BB = BB::new(0xff00000000000000);
 
@@ -45,6 +47,11 @@ impl Board {
     /// Bitboard of attacks by the given colour to the other colour
     pub fn attacks(&self, colour: Colour) -> BB {
         self.state.attacks[colour as usize][0] | self.state.attacks[colour as usize][1]
+    }
+
+    /// Whether or not the side to move is in check
+    pub fn in_check(&self) -> bool {
+        self.state.checkers != 0
     }
 
     /// Adds a hash to the current hash history and updates `state.repetitions`,
@@ -78,7 +85,6 @@ impl Board {
             state: BoardState {
                 hash: unsafe { std::mem::transmute(0u64) },
                 attacks: [[BB::new(0); 2]; 2],
-                in_check: [false; 2],
                 checkers: BB::new(0),
                 mg_eval: 0,
                 eg_eval: 0,
@@ -178,6 +184,13 @@ impl Board {
         out.hash_history.push(out.state.hash);
 
         out.state.repetitions = 1;
+        for (colour, piece_type) in [(Colour::White, PieceType::Leaper), (Colour::White, PieceType::Slider), (Colour::Black, PieceType::Leaper), (Colour::Black, PieceType::Slider)] {
+            out.state.attacks[colour as usize][piece_type as usize] = out.calculate_attacks(colour, piece_type)
+        }
+        out.state.checkers = out.calculate_checkers();
+        if (out.attacks(out.colour) & out[Piece::king(!out.colour)]) != 0 {
+            panic!("Side not to move cannot be in check");
+        }
 
         unimplemented!()
     }
@@ -227,19 +240,17 @@ impl IndexMut<Square> for Board {
 #[derive(Clone)]
 pub struct BoardState {
     /// Zobrist hash of the position
-    hash: Hash,
+    pub hash: Hash,
     /// Indexed as attacks[colour][leaper/slider]
-    attacks: [[BB; 2]; 2],
-    /// Whether or not the king is in check, indexed by colour
-    in_check: [bool; 2], 
+    pub attacks: [[BB; 2]; 2],
     /// Bitboard of source squares of pieces checking the current side to move
-    checkers: BB,
+    pub checkers: BB,
     /// middle game static evaluation of the position 
-    mg_eval: i16,
+    pub mg_eval: i16,
     /// end game static evaluation of the position
-    eg_eval: i16,
+    pub eg_eval: i16,
     /// How many times this position has appeared before
-    repetitions: u8,
+    pub repetitions: u8,
     /// The phase of the game, between 0 and 24
-    phase_unbounded: u8
+    pub phase_unbounded: u8
 }

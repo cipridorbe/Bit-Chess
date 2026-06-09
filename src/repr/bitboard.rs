@@ -3,13 +3,17 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 use crate::{repr::square::Square, test_assert};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct BB(u64);
+pub struct BB(pub u64);
 
 impl BB {
     pub const fn new(bb: u64) -> Self {
         BB(bb)
     }
 
+    /// Returns the square corresponding to the LSB
+    pub fn lsb(self) -> Square {
+        Square::from_u8(self.0.trailing_zeros() as u8)
+    }
     /// Removes the least significant set bit from `self`
     /// and returns its corresponding `Square`
     pub fn pop_lsb(&mut self) -> Square {
@@ -31,7 +35,7 @@ impl BB {
     }
 }
 
-struct BBIter(BB);
+pub struct BBIter(pub BB);
 
 impl Iterator for BBIter {
     type Item = Square;
