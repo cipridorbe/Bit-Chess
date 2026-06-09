@@ -66,7 +66,7 @@ pub fn search(stop: &Arc<AtomicBool>, board: &mut Board, mut max_depth: u8, tt: 
     };
 
     let mut helpers: Vec<_> = Vec::new();
-    for _ in 1..4 {
+    for _ in 1..3 {
         let thread_tt = Arc::clone(tt);
         let mut thread_history = original_history.clone();
         let mut thread_countermove = original_countermove.clone();
@@ -90,50 +90,6 @@ pub fn search(stop: &Arc<AtomicBool>, board: &mut Board, mut max_depth: u8, tt: 
     }
 
     best_move
-
-    // let aspiration_deltas = [(DELTA_SEARCH as f32 * 1.) as i16];
-    // for depth in 1..=max_depth {
-    //     state.max_depth = depth;
-
-    //     let mut aspiration_misses = [0, 0];
-
-    //     let mut aspiration_alpha = if depth <= 2 { -INF } else { iteration_score - aspiration_deltas[0] };
-    //     let mut aspiration_beta = if depth <= 2 { INF } else { iteration_score + aspiration_deltas[0] };
-
-    //     loop {
-    //         let (score, mv) = negamax(stop, board, aspiration_alpha, aspiration_beta, depth, 0, false, None, &mut state);
-    //         if stop.load(Ordering::Relaxed) {
-    //             break;
-    //         }
-    //         if score <= aspiration_alpha && score.abs() <= MATE_CUTOFF {
-    //             while score <= aspiration_alpha {
-    //                 aspiration_misses[0] += 1;
-    //                 if aspiration_misses[0] < aspiration_deltas.len() {
-    //                     aspiration_alpha = iteration_score - aspiration_deltas[aspiration_misses[0]];
-    //                 } else {
-    //                     aspiration_alpha = -INF;
-    //                 }
-    //             }
-    //         } else if score >= aspiration_beta && score.abs() <= MATE_CUTOFF {
-    //             while score >= aspiration_beta {
-    //                 aspiration_misses[1] += 1;
-    //                 if aspiration_misses[1] < aspiration_deltas.len() {
-    //                     aspiration_beta = iteration_score + aspiration_deltas[aspiration_misses[1]];
-    //                 } else {
-    //                     aspiration_beta = INF;
-    //                 }
-    //             }
-    //         } else {
-    //             best_move = mv;
-    //             iteration_score = score;
-    //             if score.abs() > MATE_CUTOFF {
-    //                 return best_move
-    //             }
-    //             break;
-    //         }
-    //     }
-    // }
-    // best_move
 }
 
 pub fn iterative_deepening(stop: &Arc<AtomicBool>, board: &mut Board, max_depth: u8, state: &mut SearchState) -> (Option<Move>, i16) {
@@ -280,7 +236,7 @@ pub fn negamax(stop: &Arc<AtomicBool>, board: &mut Board, mut alpha: i16, mut be
         }
     }
 
-    if !is_pv_node && allow_null_move && board.phase > 2 && beta < INF && depth > 3 && !board.in_check(board.side) {
+    if !is_pv_node && allow_null_move && board.phase > 0 && beta < INF && depth > 3 && !board.in_check(board.side) {
         let unmake = make_null_move(board);
         let null_move_score = -negamax(stop, board, -beta, -beta + 1, depth - 3, ply + 1, false, None, state).0;
         unmake_null_move(board, &unmake);

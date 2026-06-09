@@ -6,7 +6,7 @@ use crate::{repr::square::Square, test_assert};
 pub struct BB(u64);
 
 impl BB {
-    pub fn new(bb: u64) -> Self {
+    pub const fn new(bb: u64) -> Self {
         BB(bb)
     }
 
@@ -16,7 +16,7 @@ impl BB {
         test_assert!(self != 0);
         let out = self.0.trailing_zeros() as u8;
         self.0 &= self.0 - 1;
-        unsafe { std::mem::transmute(out) }
+        Square::from_u8(out)
     }
 
     /// Returns the number of ones in `self`

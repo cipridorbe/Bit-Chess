@@ -24,7 +24,7 @@
 
 use std::{mem::MaybeUninit, num::NonZeroU16};
 
-use crate::{bitboard::{Board, Piece, Square}, search::see::{see, see_positive, see_sign}};
+use crate::{bitboard::{Board, Piece, Square}, repr::board::Board, search::see::{see, see_positive, see_sign}};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
@@ -512,5 +512,12 @@ impl<'a> Iterator for LazyMoveIter<'a> {
             self.sorted = self.current;
             Some((self.movelist.moves[self.current - 1], self.scores[self.current - 1]))
         }
+    }
+}
+
+
+impl Board {
+    pub fn is_legal(mv: Move) -> bool {
+        
     }
 }

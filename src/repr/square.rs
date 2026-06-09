@@ -1,4 +1,4 @@
-use crate::repr::bitboard::BB;
+use crate::{repr::bitboard::BB, test_assert};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
@@ -14,6 +14,18 @@ pub enum Square {
 }
 
 impl Square {
+    /// Converts the given u8 to a Square
+    pub fn from_u8(square: u8) -> Self {
+        test_assert!(square < 64);
+        unsafe { std::mem::transmute(square) }
+    }
+
+    pub fn from_rank_file(rank: u8, file: u8) -> Self {
+        test_assert!(rank < 8 && file < 8);
+        Square::from_u8(rank * 8 + file)
+    }
+
+    /// Returns a bitboard with `self` set
     pub fn bb(self) -> BB {
         BB::new(1 << self as u8)
     }
@@ -26,5 +38,26 @@ impl Square {
     /// Returns the 0-indexed file, where file A is the 0'th file
     pub fn file(self) -> u8 {
         self as u8 % 8
+    }
+
+    pub fn to_fen(self) -> String {
+        let files = ["a", "b", "c", "d", "e", "f", "g", "h"];
+        let ranks = ["1", "2", "3", "4", "5", "6", "7", "8"];
+        let file = self.file();
+        let rank = self.rank();
+        format!("{}{}", files[file as usize], ranks[rank as usize])
+    }
+
+    pub fn from_fen(fen: &str) -> Option<Self> {
+        if fen == "-" {
+            return None;
+        }
+        let chars: Vec<char> = fen.chars().collect();
+        if chars.len() != 2 {
+            panic!("Invalid fen for square: {}", fen);
+        }
+        let file = chars[0] as u8 - 'a' as u8;
+        let rank = chars[1] as u8 - '1' as u8;
+        Some(Square::from_rank_file(rank, file))
     }
 }

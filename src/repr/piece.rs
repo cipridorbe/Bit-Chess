@@ -30,6 +30,11 @@ impl Piece {
         ])
     };
 
+    pub const PHASE_VALUES: [u8; 12] = [
+        0, 1, 1, 2, 4, 0,
+        0, 1, 1, 2, 4, 0,
+    ];
+
     pub fn piece_type(self) -> PieceType {
         match self {
             Piece::WhitePawn | Piece::BlackPawn |
@@ -44,6 +49,31 @@ impl Piece {
             }
             
         }
+    }
+
+    pub fn colour(self) -> Colour {
+        match self {
+            Piece::WhitePawn
+            | Piece::WhiteKnight
+            | Piece::WhiteBishop
+            | Piece::WhiteRook
+            | Piece::WhiteQueen
+            | Piece::WhiteKing => {
+                Colour::White
+            },
+            Piece::BlackPawn
+            | Piece::BlackKnight
+            | Piece::BlackBishop
+            | Piece::BlackRook
+            | Piece::BlackQueen
+            | Piece::BlackKing => {
+                Colour::Black
+            }
+        }
+    }
+
+    pub fn phase_value(self) -> u8 {
+        Piece::PHASE_VALUES[self as usize]
     }
 
     pub fn pawn(colour: Colour) -> Self {
@@ -85,6 +115,41 @@ impl Piece {
         match colour {
             Colour::White => Piece::WhiteKing,
             Colour::Black => Piece::BlackKing
+        }
+    }
+
+    pub fn to_fen(self) -> String {
+        match self {
+            Piece::WhitePawn => "P",
+            Piece::WhiteKnight => "N",
+            Piece::WhiteBishop => "B",
+            Piece::WhiteRook => "R",
+            Piece::WhiteQueen => "Q",
+            Piece::WhiteKing => "K",
+            Piece::BlackPawn => "p",
+            Piece::BlackKnight => "n",
+            Piece::BlackBishop => "b",
+            Piece::BlackRook => "r",
+            Piece::BlackQueen => "q",
+            Piece::BlackKing => "k",
+        }.to_string()
+    }
+
+    pub fn from_fen(fen: &str) -> Self {
+        match fen {
+            "P" => Piece::WhitePawn,
+            "N" => Piece::WhiteKnight,
+            "B" => Piece::WhiteBishop,
+            "R" => Piece::WhiteRook,
+            "Q" => Piece::WhiteQueen,
+            "K" => Piece::WhiteKing,
+            "p" => Piece::BlackPawn,
+            "n" => Piece::BlackKnight,
+            "b" => Piece::BlackBishop,
+            "r" => Piece::BlackRook,
+            "q" => Piece::BlackQueen,
+            "k" => Piece::BlackKing,
+            _ => panic!("Unexpected piece fen {}", fen)
         }
     }
 }
