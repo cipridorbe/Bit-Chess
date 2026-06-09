@@ -18,7 +18,7 @@ Square representation of bitboard.
 Note that rank and files are both 0-indexed.
 */
 
-use crate::{eval::eval, movegen::{attacks::{all_attacks, is_in_check}, r#move::Move}, util::squares};
+use crate::{eval::{eg_eval, mg_eval}, movegen::{attacks::{all_attacks, is_in_check}, r#move::Move}, util::squares};
 
 /// Square indices on bitboards.
 /// For example 1 << Square::a1 is the mask for the a1 square. 
@@ -302,7 +302,10 @@ pub struct Board {
     pub(crate) history: HashHistory,
 
     /// The absolute score of the board. Positive = white wins, Negative = black win.
-    pub(crate) score: i16,
+    pub(crate) mg_score: i16,
+
+    /// The end game score of the board
+    pub(crate) eg_score: i16,
 
     /// The number of times the current move appears in the search history
     pub(crate) repetitions: u8,
@@ -550,8 +553,9 @@ impl Board {
         let mut history = HashHistory::new();
         history.hashes.push(hash);
 
-        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, score: 0, repetitions: 1, white_in_check: false, black_in_check: false };
-        b.score = eval(&b);
+        let mut b = Board { pieces, sides, occupied, side, castling, enpassant, halfmoves, fullmoves, mailbox, hash, history, mg_score: 0, eg_score: 0, repetitions: 1, white_in_check: false, black_in_check: false };
+        b.mg_score = mg_eval(&b);
+        b.eg_score = eg_eval(&b);
         let white_attacks = all_attacks(&b, Side::White);
         let black_attacks = all_attacks(&b, Side::Black);
         b.white_in_check = black_attacks & b.pieces[Piece::WhiteKing as usize] != 0; 
