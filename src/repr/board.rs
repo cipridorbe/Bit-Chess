@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::r#move::Move, repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square}, search::state::SearchState};
+use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::r#move::Move, repr::{bitboard::BB, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::Square}, search::state::SearchState, test_assert};
 
 #[derive(Clone)]
 pub struct Board {
@@ -57,6 +57,7 @@ impl Board {
 
     /// Whether or not the side to move is in check
     pub fn in_check(&self) -> bool {
+        test_assert!(((self.state.attacks[!self.colour as usize][0] | self.state.attacks[!self.colour as usize][1]) & self[Piece::king(self.colour)] != 0) == (self.state.checkers != 0)); 
         self.state.checkers != 0
     }
 

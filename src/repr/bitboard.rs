@@ -17,7 +17,7 @@ impl BB {
     /// Removes the least significant set bit from `self`
     /// and returns its corresponding `Square`
     pub fn pop_lsb(&mut self) -> Square {
-        test_assert!(self != 0);
+        test_assert!(*self != 0);
         let out = self.0.trailing_zeros() as u8;
         self.0 &= self.0 - 1;
         Square::from_u8(out)

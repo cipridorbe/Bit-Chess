@@ -88,32 +88,52 @@ impl Game {
         Some(0)
     }
 
-    /// Finds the best move to make. Returns the move and the searched depth.
-    /// If depth is `None`, no depth limit is used.
-    /// If time is `Some`, then the move is searched for the given duration,
-    /// otherwise the time to search is determined by the time remaining
-    pub fn find_best_move(&mut self, depth: Option<u8>, time: Option<Duration>) -> (Option<Move>, u8) {
+    /// Finds the best move to make.
+    /// - `depth`: max search depth; `None` uses MAX_PLY
+    /// - `time`: explicit time budget; `None` uses the game's own time tracking (panics for infinite games)
+    /// - `stop_flag`: optional external flag that can interrupt the search early (e.g. UCI stop)
+    pub fn find_best_move(&mut self, depth: Option<u8>, time: Option<Duration>, stop_flag: Option<Arc<AtomicBool>>) -> (Option<Move>, Eval, u8, u64) {
         let depth = depth.unwrap_or(MAX_PLY);
-        let time = time.map_or(self.calculate_move_time(), |time| { time.mul_f32(0.95) });
-        let stop_flag = Arc::new(AtomicBool::new(false));
-        let stop_flag_cloned = Arc::clone(&stop_flag);
-        let _ = std::thread::spawn(move || {
-            let thread_stop_flag = Arc::clone(&stop_flag_cloned);
-            std::thread::sleep(time);
-            thread_stop_flag.store(true, Ordering::Relaxed);
-        });
-        search(&mut self.board, &mut self.search_state, depth, &stop_flag)
+        let internal_stop = Arc::new(AtomicBool::new(false));
+
+        // Spawn timer if a time budget is available
+        let timer_duration = time.map(|t| t.mul_f32(0.95))
+            .or_else(|| self.total_time.map(|_| self.calculate_move_time()));
+        if let Some(duration) = timer_duration {
+            let flag = Arc::clone(&internal_stop);
+            std::thread::spawn(move || {
+                std::thread::sleep(duration);
+                flag.store(true, Ordering::Relaxed);
+            });
+        }
+
+        // Bridge external stop flag to internal one
+        if let Some(ext) = stop_flag {
+            let flag = Arc::clone(&internal_stop);
+            std::thread::spawn(move || {
+                while !ext.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                flag.store(true, Ordering::Relaxed);
+            });
+        }
+
+        search(&mut self.board, &mut self.search_state, depth, &internal_stop)
     }
 
     fn calculate_move_time(&self) -> Duration {
-        if self.total_time.is_none() {
-            panic!("Cannot calculate move time with infinite time")
-        }
         self.time_left[self.board.colour as usize] / 20 + self.time_increment / 2
     }
 
-    pub fn find_best_move_with_flag(&mut self, depth: Option<u8>, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, u8) {
-        let depth = depth.unwrap_or(MAX_PLY);
-        search(&mut self.board, &mut self.search_state, depth, stop_flag)
+    pub fn calculate_move_time_basic(time_left: Duration, increment: Duration) -> Duration {
+        time_left / 20 + increment / 2
+    }
+
+    pub fn set_board(&mut self, board: Board) {
+        self.board = board;
+    }
+
+    pub fn colour(&self) -> Colour {
+        self.board.colour
     }
 }

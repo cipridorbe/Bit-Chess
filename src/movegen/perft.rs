@@ -153,10 +153,8 @@ mod bench {
             let nodes = perft(&mut board, DEPTH);
             let secs = t0.elapsed().as_secs_f64();
 
-            // let sf = stockfish_nodes(fen, DEPTH);
-            let sf = 0;
-            // let ok = nodes == sf;
-            let ok = true;
+            let sf = stockfish_nodes(fen, DEPTH);
+            let ok = nodes == sf;
             all_ok &= ok;
             let status = if ok { "✓" } else { "✗" };
             let mismatch = if ok { String::new() } else { format!("  (sf={sf})") };
@@ -269,6 +267,6 @@ mod debug {
     #[test]
     #[ignore]
     fn debug_perft() {
-        find_bug("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 5, 0);
+        find_bug("7k/8/8/R4b2/3p4/1K6/2P5/8 b - - 0 1", 5, 0);
     }
 }

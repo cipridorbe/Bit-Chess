@@ -20,7 +20,7 @@ impl SearchState {
             history: [[0; 64]; 64],
             counter_move: [[None; 64]; 64],
             max_depth: 0,
-            node_count: 0
+            node_count: 0,
         }
     }
 
@@ -47,7 +47,7 @@ impl SearchState {
             history: self.history.clone(),
             counter_move: self.counter_move.clone(),
             max_depth: self.max_depth,
-            node_count: 0
+            node_count: 0,
         }
     }
 

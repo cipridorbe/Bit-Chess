@@ -196,7 +196,14 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
         if moved_checks {
             board.state.checkers |= final_square;
         }
-        if SEGMENT[mv.source_square() as usize][king.lsb() as usize] != 0 {
+        let enpassant_check = mv.flag() == Flag::ENPASSANT && {
+            let captured_square = match colour {
+                Colour::White => Square::from_u8(mv.target_square() as u8 - 8),
+                Colour::Black => Square::from_u8(mv.target_square() as u8 + 8),
+            };
+            SEGMENT[captured_square as usize][king.lsb() as usize] != 0
+        };
+        if SEGMENT[mv.source_square() as usize][king.lsb() as usize] != 0 || enpassant_check {
             let bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied());
             if bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]) != 0 {
                 board.state.checkers |= bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]);
@@ -322,7 +329,7 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
 }
 
 fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
-    test_assert!(board.move_history.last() == Some(Move::NULL_MOVE));
+    test_assert!(board.move_history.last().copied() == Some(Move::NULL_MOVE));
     null_unmake_info.write(board);
     let colour = board.colour;
     if colour == Colour::White {

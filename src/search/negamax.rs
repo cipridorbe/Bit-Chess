@@ -2,19 +2,57 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::Move, repr::board::{self, Board}, search::{MAX_PLY, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::Move, repr::board::{Board}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub const TIMEOUT_MOD: u64 = 1 << 12;
 
-pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, u8) {
-    panic!()
+pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, Eval, u8, u64) {
+    search_state.new_search();
+    let mut threads = Vec::new();
+    let fake_stop_flag = Arc::new(AtomicBool::new(false));
+    for _ in 1..NUM_THREADS {
+        let mut cloned_search_state = search_state.new_helper_thread();
+        let mut cloned_board = board.clone();
+        let cloned_stop_flag = Arc::clone(&fake_stop_flag);
+        let thread = std::thread::spawn(move || {
+            iterative_deepening(&mut cloned_board, &mut cloned_search_state, depth, &cloned_stop_flag)
+        });
+        threads.push(thread);
+    }
+
+    let (mv, eval, depth, mut nodes_visted) = iterative_deepening(board, search_state, depth, stop_flag);
+    fake_stop_flag.store(true, Ordering::Relaxed);
+    for thread in threads {
+        if let Ok((_, _, _, nodes)) = thread.join() {
+            nodes_visted += nodes;
+        }
+    }
+
+    (mv, eval, depth, nodes_visted)
+}
+
+pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, Eval, u8, u64) {
+    let mut best_move = None;
+    let mut score = 0;
+    let mut reached_depth = 0;
+    for depth in 1..=max_depth {
+        state.max_depth = depth + depth / 2;
+        let (mv, current_score) = negamax(stop_flag, board, state, depth, 0, -INF, INF, false);
+        if stop_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        best_move = mv;
+        score = current_score;
+        reached_depth = depth;
+    }
+    (best_move, score, reached_depth, state.node_count)
 }
 
 pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, depth: u8, ply: u8, mut alpha: Eval, mut beta: Eval, null_move_allowed: bool) -> (Option<Move>, Eval) {
     state.node_count += 1;
 
     // if stop flag is set, stop the search
-    if state.node_count % TIMEOUT_MOD == 0 {
+    if state.node_count % TIMEOUT_MOD == 0 || depth > 5 {
         if stop_flag.load(Ordering::Relaxed) {
             return (None, 0);
         }
@@ -64,15 +102,17 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     // TODO: test if pv_node improves speed
     if tt_move.is_none() && depth >= 4 {
         let new_depth = depth / 2 + 1;
-        tt_move = negamax(stop_flag, board, state, new_depth, ply + 1, -beta, -alpha, false).0;
+        tt_move = negamax(stop_flag, board, state, new_depth, ply, alpha, beta, false).0;
     }
 
     let mut tried_quiets = [Move::NULL_MOVE; 218];
     let mut tried_quiets_idx = 0;
+    let mut moved = false;
 
     // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
         let unmake_info = board.makemove(mv);
+        moved = true;
         let score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
         board.unmakemove(mv, score, unmake_info, None);
         alpha = alpha.max(score);
@@ -95,7 +135,6 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     let mut best_move = None;
     let mut best_score = -INF;
-    let mut moved = false;
     let mut i = if tt_move.is_none() { 0 } else { 1 };
     while i < movelist.length {
         let mv = movelist[i];
@@ -104,25 +143,24 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             continue;
         }
         let unmake_info = board.makemove(mv);
-        moved = true;
 
         let score = if board.is_rule_draw() { 0 } else {
             // PVS: search the first move normally. Search the rest with a null window and re-search if it beats alpha
-            if i == 0 {
+            if !moved {
                 -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
             } else {
                 let mut reduced_search_depth = depth - 1;
                 if depth >= 3 && tried_quiets_idx >= 3 && !in_check && ply > 1 && !mv.is_queen_promotion() {
-                    reduced_search_depth = LMR_TABLE[depth.min(63) as usize][i as usize];
+                    reduced_search_depth = (depth - 1).saturating_sub(LMR_TABLE[depth.min(63) as usize][i as usize]);
                 }
                 let mut score = -negamax(stop_flag, board, state, reduced_search_depth, ply + 1, -alpha-1, -alpha, true).1;
                 if score > alpha {
-                    score = -negamax(stop_flag, board, state, full_search_depth, ply + 2, -beta, -alpha, true).1;
+                    score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
                 }
                 score
             }
         };
-
+        moved = true;
         board.unmakemove(mv, score, unmake_info, Some(&mut movelist));
         if score > best_score {
             best_score = score;
@@ -147,8 +185,8 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     if board.state.repetitions <= 1 {
         let tt_flag = 
-            if best_score > beta { TTFlag::LowerBound }
-            else if best_score < original_alpha { TTFlag::UpperBound }
+            if best_score >= beta { TTFlag::LowerBound }
+            else if best_score <= original_alpha { TTFlag::UpperBound }
             else { TTFlag::Exact };
         let tt_entry = TTEntry::new(board.state.hash, best_score, tt_flag, best_move, depth, state.tt.generation());
         state.tt.insert(tt_entry, ply);
