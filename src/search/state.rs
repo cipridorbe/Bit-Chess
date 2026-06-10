@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use crate::{movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
+use crate::{eval::pawn::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
 
 #[derive(Clone)]
 pub struct SearchState {
     pub tt: Arc<TT>,
+    pub pawn_table: Arc<PawnTable>,
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
     pub history: [[MoveScore; 64]; 64],
     pub counter_move: [[Option<Move>; 64]; 64],
@@ -13,9 +14,10 @@ pub struct SearchState {
 }
 
 impl SearchState {
-    pub fn new(tt_bits: u8, tt_generation_cutoff: u8) -> Self {
+    pub fn new(tt_bits: u8, tt_generation_cutoff: u8, pawn_table_bits: u8) -> Self {
         SearchState {
             tt: Arc::new(TT::new(tt_bits, tt_generation_cutoff)),
+            pawn_table: Arc::new(PawnTable::new(pawn_table_bits)),
             killers: [[None; 2]; MAX_PLY as usize],
             history: [[0; 64]; 64],
             counter_move: [[None; 64]; 64],
@@ -43,6 +45,7 @@ impl SearchState {
     pub fn new_helper_thread(&self) -> Self {
         SearchState {
             tt: Arc::clone(&self.tt),
+            pawn_table: Arc::clone(&self.pawn_table),
             killers: self.killers.clone(),
             history: self.history.clone(),
             counter_move: self.counter_move.clone(),

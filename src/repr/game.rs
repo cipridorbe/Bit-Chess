@@ -13,43 +13,45 @@ pub struct Game {
 
 impl Game {
     /// Creates a new game from the starting position with no time limit
-    pub fn new_infinite(tt_bits: Option<u8>, tt_generation_cutoff: Option<u8>) -> Self {
+    pub fn new_infinite(tt_bits: Option<u8>, tt_generation_cutoff: Option<u8>, pawn_table_bits: Option<u8>) -> Self {
         let tt_bits = tt_bits.unwrap_or(23);
         let tt_generation_cutoff = tt_generation_cutoff.unwrap_or(2);
+        let pawn_table_bits = pawn_table_bits.unwrap_or(18);
         Game {
             board: Board::starting_position(),
             total_time: None,
             time_increment: Duration::new(0, 0),
             time_left: [Duration::new(0, 0); 2],
-            search_state: SearchState::new(tt_bits, tt_generation_cutoff)
+            search_state: SearchState::new(tt_bits, tt_generation_cutoff, pawn_table_bits)
         }
     }
 
-    pub fn new_finite(total_time: Duration, time_increment: Duration, tt_bits: Option<u8>, tt_generation_cutoff: Option<u8>) -> Self {
+    pub fn new_finite(total_time: Duration, time_increment: Duration, tt_bits: Option<u8>, tt_generation_cutoff: Option<u8>, pawn_table_bits: Option<u8>) -> Self {
         if total_time <= Duration::new(0, 0) || time_increment < Duration::new(0, 0) {
             panic!("Cannot have negative time");
         }
         let tt_bits = tt_bits.unwrap_or(23);
         let tt_generation_cutoff = tt_generation_cutoff.unwrap_or(2);
+        let pawn_table_bits = pawn_table_bits.unwrap_or(18);
         Game {
             board: Board::starting_position(),
             total_time: Some(total_time),
             time_increment: time_increment,
             time_left: [total_time; 2],
-            search_state: SearchState::new(tt_bits, tt_generation_cutoff)
+            search_state: SearchState::new(tt_bits, tt_generation_cutoff, pawn_table_bits)
         }
     }
 
     pub fn new_10min() -> Self {
-        Game::new_finite(Duration::from_secs(60*10), Duration::from_secs(0), None, None)
+        Game::new_finite(Duration::from_secs(60*10), Duration::from_secs(0), None, None, None)
     }
 
     pub fn new_3min() -> Self {
-        Game::new_finite(Duration::from_secs(60*3), Duration::from_secs(1), None, None)
+        Game::new_finite(Duration::from_secs(60*3), Duration::from_secs(1), None, None, None)
     }
 
     pub fn new_1min() -> Self {
-        Game::new_finite(Duration::from_secs(60*1), Duration::from_secs(2), None, None)
+        Game::new_finite(Duration::from_secs(60*1), Duration::from_secs(2), None, None, None)
     }
 
     pub fn game_over_score(&mut self) -> Option<Eval> {

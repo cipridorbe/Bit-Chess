@@ -1,6 +1,8 @@
 use crate::{repr::{board::Board, colour::Colour}, search::MAX_PLY};
 
 pub mod pst;
+pub mod pawn;
+pub mod king;
 
 pub type Eval = i16;
 

@@ -56,6 +56,10 @@ impl Piece {
         }
     }
 
+    pub fn is_pawn_or_king(self) -> bool {
+        self == Piece::WhitePawn || self == Piece::BlackPawn || self == Piece::WhiteKing || self == Piece::BlackKing
+    }
+
     pub fn colour(self) -> Colour {
         match self {
             Piece::WhitePawn

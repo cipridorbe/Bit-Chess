@@ -3,12 +3,12 @@
 
 
 /// If a file has a 1, the entire file is marked with a 1
-pub fn populate_files(bb: u64) -> u64 {
+pub fn populate_files(bb: BB) -> BB {
     populate_files_up(bb) | populate_files_down(bb)
 }
 
 /// Populates files only on higher ranks
-pub fn populate_files_up(mut bb: u64) -> u64 {
+pub fn populate_files_up(mut bb: BB) -> BB {
     bb |= bb << 8;
     bb |= bb << 16;
     bb |= bb << 32;
@@ -16,7 +16,7 @@ pub fn populate_files_up(mut bb: u64) -> u64 {
 }
 
 /// Populates files only going down
-pub fn populate_files_down(mut bb: u64) -> u64 {
+pub fn populate_files_down(mut bb: BB) -> BB {
     bb |= bb >> 8;
     bb |= bb >> 16;
     bb |= bb >> 32;

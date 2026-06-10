@@ -2,7 +2,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::Move, repr::board::{Board}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move}, repr::board::Board, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub const TIMEOUT_MOD: u64 = 1 << 12;
 
@@ -108,13 +108,16 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     let mut tried_quiets = [Move::NULL_MOVE; 218];
     let mut tried_quiets_idx = 0;
     let mut moved = false;
+    let mut best_move = None;
+    let mut best_score = -INF;
+    let mut add_proms = false;
 
     // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
         let unmake_info = board.makemove(mv);
         moved = true;
         let score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
-        board.unmakemove(mv, score, unmake_info, None);
+        add_proms = board.unmakemove(mv, score, unmake_info, None);
         alpha = alpha.max(score);
         if alpha >= beta {
             state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
@@ -126,15 +129,25 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             tried_quiets[tried_quiets_idx] = mv;
             tried_quiets_idx += 1;
         }
+        best_score = score;
+        best_move = tt_move;
     }
 
     // If we haven't cut off, we have to start exploring more moves
     let mut movelist = board.generate_movelist(false);
     let mut scores = movelist.score(board, state, tt_move, ply);
     movelist.sort(&mut scores);
+    if add_proms {
+        let prom = tt_move.unwrap();
+        if prom.is_capture() {
+            movelist.add(Move::new(Flag::ROOKPROMCAP, prom.target_square(), prom.source_square()));
+            movelist.add(Move::new(Flag::BISHOPPROMCAP, prom.target_square(), prom.source_square()));
+        } else {
+            movelist.add(Move::new(Flag::ROOKPROM, prom.target_square(), prom.source_square()));
+            movelist.add(Move::new(Flag::BISHOPPROM, prom.target_square(), prom.source_square()));
+        }
+    }
 
-    let mut best_move = None;
-    let mut best_score = -INF;
     let mut i = if tt_move.is_none() { 0 } else { 1 };
     while i < movelist.length {
         let mv = movelist[i];
@@ -151,7 +164,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             } else {
                 let mut reduced_search_depth = depth - 1;
                 if depth >= 3 && tried_quiets_idx >= 3 && !in_check && ply > 1 && !mv.is_queen_promotion() {
-                    reduced_search_depth = (depth - 1).saturating_sub(LMR_TABLE[depth.min(63) as usize][i as usize]);
+                    reduced_search_depth = (depth - 1).saturating_sub(LMR_TABLE[depth.min(63) as usize][i.min(63) as usize]);
                 }
                 let mut score = -negamax(stop_flag, board, state, reduced_search_depth, ply + 1, -alpha-1, -alpha, true).1;
                 if score > alpha {

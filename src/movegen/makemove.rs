@@ -25,6 +25,9 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     board.state.mg_eval -= PST_MG[piece as usize][mv.source_square() as usize];
     board.state.eg_eval -= PST_EG[piece as usize][mv.source_square() as usize];
     board.state.hash ^= Hash::POSITION_PIECE[piece as usize][mv.source_square() as usize];
+    if piece.is_pawn_or_king() {
+        board.state.pawn_hash ^= Hash::POSITION_PIECE[piece as usize][mv.source_square() as usize] ^ Hash::POSITION_PIECE[piece as usize][mv.target_square() as usize];
+    }
     if mv.is_promotion() {
         let new_piece = mv.promoted_piece(colour);
         final_piece = new_piece;
@@ -33,6 +36,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
         board.state.mg_eval += PST_MG[new_piece as usize][mv.target_square() as usize];
         board.state.eg_eval += PST_EG[new_piece as usize][mv.target_square() as usize];
         board.state.hash ^= Hash::POSITION_PIECE[new_piece as usize][mv.target_square() as usize];
+        board.state.pawn_hash ^= Hash::POSITION_PIECE[piece as usize][mv.target_square() as usize];
         board.state.phase_unbounded += new_piece.phase_value();
     } else {
         board[piece] |= mv.target_square().bb();
@@ -53,11 +57,15 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
         board.state.mg_eval -= PST_MG[captured.unwrap() as usize][captured_square as usize] + PIECE_VALUE_MG[captured.unwrap() as usize];
         board.state.eg_eval -= PST_EG[captured.unwrap() as usize][captured_square as usize] + PIECE_VALUE_EG[captured.unwrap() as usize];
         board.state.hash ^= Hash::POSITION_PIECE[captured.unwrap() as usize][captured_square as usize];
+        board.state.pawn_hash ^= Hash::POSITION_PIECE[captured.unwrap() as usize][captured_square as usize];
     } else if mv.is_capture() {
         board[captured.unwrap()] &= !mv.target_square().bb();
         board.state.mg_eval -= PST_MG[captured.unwrap() as usize][mv.target_square() as usize] + PIECE_VALUE_MG[captured.unwrap() as usize];
         board.state.eg_eval -= PST_EG[captured.unwrap() as usize][mv.target_square() as usize] + PIECE_VALUE_EG[captured.unwrap() as usize];
         board.state.hash ^= Hash::POSITION_PIECE[captured.unwrap() as usize][mv.target_square() as usize];
+        if captured.unwrap() == Piece::WhitePawn || captured.unwrap() == Piece::BlackPawn {
+            board.state.pawn_hash ^= Hash::POSITION_PIECE[captured.unwrap() as usize][mv.target_square() as usize];
+        }
         match mv.target_square() {
             Square::a1 => board.castling_rights.unset_white_queen(),
             Square::h1 => board.castling_rights.unset_white_king(),
@@ -252,7 +260,8 @@ fn null_makemove(board: &mut Board) -> NullUnmakeInfo {
     null_unmake_info
 }
 
-fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) {
+fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) -> bool {
+    let mut out = false;
     let colour = board.colour;
 
     let piece = unmake_info.piece;
@@ -281,7 +290,7 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
                 movelist.add_to_end(Move::new(Flag::ROOKPROM, mv.target_square(), mv.source_square()));
             }
         } else {
-            println!("Unmaking queen promotion stalemate didn't add underpromotions");
+            out = true;
         }
     }
 
@@ -326,6 +335,7 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
     }
     
     board.colour = !colour;
+    out
 }
 
 fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
@@ -397,8 +407,8 @@ impl Board {
         makemove(self, mv)
     }
 
-    pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) {
-        unmakemove(self, mv, mv_score, unmake_info, movelist);
+    pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) -> bool {
+        unmakemove(self, mv, mv_score, unmake_info, movelist)
     }
 
     pub fn null_makemove(&mut self) -> NullUnmakeInfo {

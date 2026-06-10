@@ -37,6 +37,8 @@ impl Board {
     pub const RANK_1: BB = BB::new(0x00000000000000ff);
     pub const RANK_2: BB = BB::new(0x000000000000ff00);
     pub const RANK_3: BB = BB::new(0x0000000000ff0000);
+    pub const RANK_4: BB = BB::new(0x00000000ff000000);
+    pub const RANK_5: BB = BB::new(0x000000ff00000000);
     pub const RANK_6: BB = BB::new(0x0000ff0000000000);
     pub const RANK_7: BB = BB::new(0x00ff000000000000);
     pub const RANK_8: BB = BB::new(0xff00000000000000);
@@ -95,7 +97,7 @@ impl Board {
         self.hash_history.push(hash);
         self.state.repetitions = 1;
         if self.halfmove_clock >= 4 {
-            let mut idx = self.hash_history.len() as i16 - 2;
+            let mut idx = self.hash_history.len() as i16 - 3;
             let end = self.hash_history.len()  as i16 - self.halfmove_clock as i16;
             while idx >= end && idx >= 0{
                 if self.hash_history [idx as usize] == hash {
@@ -120,6 +122,7 @@ impl Board {
             move_history: Vec::new(),
             state: BoardState {
                 hash: unsafe { std::mem::transmute(0u64) },
+                pawn_hash: unsafe { std::mem::transmute(0u64) },
                 attacks: [[BB::new(0); 2]; 2],
                 checkers: BB::new(0),
                 mg_eval: 0,
@@ -201,6 +204,9 @@ impl Board {
                 out[piece] |= square;
                 out[piece.colour()] |= square;
                 out.state.hash ^= Hash::POSITION_PIECE[piece as usize][square as usize];
+                if piece.is_pawn_or_king() {
+                    out.state.pawn_hash ^= Hash::POSITION_PIECE[piece as usize][square as usize];
+                }
                 out.state.phase_unbounded += piece.phase_value();
                 out.state.mg_eval += PIECE_VALUE_MG[piece as usize] + PST_MG[piece as usize][square as usize];
                 out.state.eg_eval += PIECE_VALUE_EG[piece as usize] + PST_EG[piece as usize][square as usize];
@@ -279,6 +285,8 @@ impl IndexMut<Square> for Board {
 pub struct BoardState {
     /// Zobrist hash of the position
     pub hash: Hash,
+    /// Pawn-king Zobrist hash of position
+    pub pawn_hash: Hash,
     /// Indexed as `attacks[colour][piece_type]`
     pub attacks: [[BB; 2]; 2],
     /// Bitboard of source squares of pieces checking the current side to move
