@@ -268,11 +268,9 @@ impl MoveList {
             let mv = self[i];
             let score = scores[i];
             let mut j = i;
-            while j > 0 {
-                if scores[j - 1] < score {
-                    self[j] = self[j - 1];
-                    scores[j] = scores[j - 1];
-                }
+            while j > 0 && scores[j - 1] < score {
+                self[j] = self[j - 1];
+                scores[j] = scores[j - 1];
                 j -= 1;
             }
             self[j] = mv;

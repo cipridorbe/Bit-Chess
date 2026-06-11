@@ -70,11 +70,23 @@ impl TT {
     pub fn insert(&self, mut entry: TTEntry, ply: u8) {
         let idx = entry.hash.0 & self.mask;
         let current_entry = unsafe { &mut *self.table[idx as usize].get() };
-        if entry.generation - current_entry.generation >= self.generation_cutoff
+        if entry.generation.wrapping_sub(current_entry.generation) >= self.generation_cutoff
             || entry.depth >= current_entry.depth || current_entry.hash.0 == 0
         {
             entry.eval = adjust_insert_eval(entry.eval, ply);
+            let hash = entry.hash;
+            entry.hash = Hash(0);
             *current_entry = entry;
+            current_entry.hash = hash;
+            // let p = current_entry as *mut TTEntry;
+            // unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!((*p).hash), Hash(0)) };
+            // current_entry.eval = entry.eval;
+            // current_entry.flag = entry.flag;
+            // current_entry.best_move = entry.best_move;
+            // current_entry.depth = entry.depth;
+            // current_entry.generation = entry.generation;
+            // std::sync::atomic::fence(std::sync::atomic::Ordering::Release);
+            // unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!((*p).hash), entry.hash) };
         }
     }
 

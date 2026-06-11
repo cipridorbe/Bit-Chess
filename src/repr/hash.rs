@@ -1,6 +1,6 @@
 use std::ops::{BitXor, BitXorAssign};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Hash(pub u64);
 
 impl Hash {

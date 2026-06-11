@@ -218,7 +218,7 @@ mod test {
         use crate::repr::board::Board;
         use crate::search::{NUM_THREADS, negamax::{negamax, iterative_deepening}, state::SearchState};
 
-        const MAX_TEST_DEPTH: u8 = 10;
+        const MAX_TEST_DEPTH: u8 = 15;
 
         let positions: &[(&str, &[&str])] = &[
             ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", &[]),
@@ -259,10 +259,10 @@ mod test {
                 format!("{} ..{}", &fen[..fen.find(' ').unwrap_or(fen.len())], moves.last().unwrap())
             };
             eprintln!("\n{}", label);
-            eprintln!("{:<6} {:>10} {:>7} {:>12}  best", "depth", "ms", "ratio", "nodes");
+            eprintln!("{:<6} {:>10} {:>7} {:>7} {:>12}  best", "depth", "ms", "r(i-1)", "r(i-2)", "nodes");
 
             // Main thread does its own depth loop with per-depth timing, sharing TT with helpers
-            let mut prev_ms = 0.0f64;
+            let mut prev_ms = [0.0f64; 2];
             let mut prev_nodes = 0u64;
             for depth in 1..=MAX_TEST_DEPTH {
                 state.max_depth = depth + depth / 2;
@@ -270,10 +270,12 @@ mod test {
                 let (mv, score) = negamax(&stop, &mut board, &mut state, depth, 0, -INF, INF, false);
                 let ms = start.elapsed().as_secs_f64() * 1000.0;
                 let delta_nodes = state.node_count - prev_nodes;
-                let ratio = if prev_ms > 0.5 { ms / prev_ms } else { 0.0 };
+                let r1 = if prev_ms[0] > 0.5 { ms / prev_ms[0] } else { 0.0 };
+                let r2 = if prev_ms[1] > 0.5 { ms / prev_ms[1] } else { 0.0 };
                 let best = mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".to_string());
-                eprintln!("{:<6} {:>10.1} {:>7.2}  {:>12}  {} ({})", depth, ms, ratio, delta_nodes, best, score);
-                prev_ms = ms;
+                eprintln!("{:<6} {:>10.1} {:>7.2} {:>7.2}  {:>12}  {} ({})", depth, ms, r1, r2, delta_nodes, best, score);
+                prev_ms[1] = prev_ms[0];
+                prev_ms[0] = ms;
                 prev_nodes = state.node_count;
             }
 

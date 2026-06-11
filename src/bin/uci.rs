@@ -62,7 +62,6 @@ fn end_search(stop: &Arc<AtomicBool>, handle: &mut Option<thread::JoinHandle<Gam
 }
 
 fn main() {
-    bitchess::logger::init(r"C:\Users\cipri\projects\bitchess\bitchess.log");
     let stdin = io::stdin();
     let mut game: Option<Game> = Some(Game::new_infinite(None, None, None));
     let mut search_handle: Option<thread::JoinHandle<Game>> = None;
@@ -70,7 +69,6 @@ fn main() {
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
-        bitchess::log!(">> {}", line);
         let tokens: Vec<&str> = line.split_whitespace().collect();
         if tokens.is_empty() { continue; }
 
@@ -127,7 +125,6 @@ fn main() {
                 let handle = thread::spawn(move || {
                     let (mv, _eval, _reached_depth, _nodes) = g.find_best_move(depth, time, Some(stop_clone));
                     let bestmove = format!("bestmove {}", mv.map(|m| m.to_uci()).unwrap_or_else(|| "0000".to_string()));
-                    bitchess::log!("<< {}", bestmove);
                     println!("{}", bestmove);
                     io::stdout().flush().unwrap();
                     g

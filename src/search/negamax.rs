@@ -8,14 +8,12 @@ pub const TIMEOUT_MOD: u64 = 1 << 12;
 
 pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>, end: Option<Instant>) -> (Option<Move>, Eval, u8, u64) {
     search_state.new_search();
-    crate::log!("=== search start  fen={} max_depth={} end={:?} ===", board.to_fen(), depth, end);
     let mut threads = Vec::new();
     let fake_stop_flag = Arc::new(AtomicBool::new(false));
-    for t in 1..NUM_THREADS {
+    for _ in 1..NUM_THREADS {
         let mut cloned_search_state = search_state.new_helper_thread();
         let mut cloned_board = board.clone();
         let cloned_stop_flag = Arc::clone(&fake_stop_flag);
-        crate::log!("  spawning helper thread {}", t);
         let thread = std::thread::spawn(move || {
             iterative_deepening(&mut cloned_board, &mut cloned_search_state, depth, &cloned_stop_flag, end)
         });
@@ -30,8 +28,6 @@ pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop
         }
     }
 
-    crate::log!("=== search done  best={} eval={} depth={} nodes={} ===",
-        mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".into()), eval, reached, nodes_visited);
     (mv, eval, reached, nodes_visited)
 }
 
@@ -45,24 +41,19 @@ pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth
         if let Some(end) = end {
             let remaining = end.saturating_duration_since(start);
             let predicted = last_iteration_duration.mul_f32(1.0);
-            crate::log!("  depth={} remaining={}ms predicted={}ms", depth, remaining.as_millis(), predicted.as_millis());
             if remaining < predicted {
-                crate::log!("  -> early exit at depth {}", depth);
                 break;
             }
         }
         state.max_depth = depth + depth / 2;
         let (mv, current_score) = negamax(stop_flag, board, state, depth, 0, -INF, INF, false);
         if stop_flag.load(Ordering::Relaxed) {
-            crate::log!("  depth={} stopped by flag  best_so_far={}", depth, best_move.map(|m: Move| m.to_uci()).unwrap_or_else(|| "none".into()));
             break;
         }
         best_move = mv;
         score = current_score;
         reached_depth = depth;
         last_iteration_duration = Instant::now() - start;
-        crate::log!("  depth={} score={} move={} elapsed={}ms",
-            depth, score, best_move.map(|m: Move| m.to_uci()).unwrap_or_else(|| "none".into()), last_iteration_duration.as_millis());
     }
     (best_move, score, reached_depth, state.node_count)
 }
@@ -133,23 +124,27 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
-        let unmake_info = board.makemove(mv);
-        moved = true;
-        let score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
-        add_proms = board.unmakemove(mv, score, unmake_info, None);
-        alpha = alpha.max(score);
-        if alpha >= beta {
-            state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
-            let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
-            state.tt.insert(tt_entry, ply);
-            return (tt_move, score)
+        if !board.is_legal_partial(mv) {
+            tt_move = None;
+        } else {
+            let unmake_info = board.makemove(mv);
+            moved = true;
+            let score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
+            add_proms = board.unmakemove(mv, score, unmake_info, None);
+            alpha = alpha.max(score);
+            if alpha >= beta {
+                state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
+                let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
+                state.tt.insert(tt_entry, ply);
+                return (tt_move, score)
+            }
+            if !mv.is_capture() {
+                tried_quiets[tried_quiets_idx] = mv;
+                tried_quiets_idx += 1;
+            }
+            best_score = score;
+            best_move = tt_move;
         }
-        if !mv.is_capture() {
-            tried_quiets[tried_quiets_idx] = mv;
-            tried_quiets_idx += 1;
-        }
-        best_score = score;
-        best_move = tt_move;
     }
 
     // If we haven't cut off, we have to start exploring more moves
