@@ -1,4 +1,4 @@
-use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::Duration};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 
 use crate::{eval::Eval, movegen::r#move::Move, repr::{board::Board, colour::Colour, piece::Piece, square::Square}, search::{MAX_PLY, negamax::search, state::SearchState}};
 
@@ -97,11 +97,13 @@ impl Game {
     pub fn find_best_move(&mut self, depth: Option<u8>, time: Option<Duration>, stop_flag: Option<Arc<AtomicBool>>) -> (Option<Move>, Eval, u8, u64) {
         let depth = depth.unwrap_or(MAX_PLY);
         let internal_stop = Arc::new(AtomicBool::new(false));
+        let mut end = None;
 
         // Spawn timer if a time budget is available
         let timer_duration = time.map(|t| t.mul_f32(0.95))
             .or_else(|| self.total_time.map(|_| self.calculate_move_time()));
         if let Some(duration) = timer_duration {
+            end = Some(Instant::now() + duration);
             let flag = Arc::clone(&internal_stop);
             std::thread::spawn(move || {
                 std::thread::sleep(duration);
@@ -120,15 +122,16 @@ impl Game {
             });
         }
 
-        search(&mut self.board, &mut self.search_state, depth, &internal_stop)
+        search(&mut self.board, &mut self.search_state, depth, &internal_stop, end)
     }
 
     fn calculate_move_time(&self) -> Duration {
         self.time_left[self.board.colour as usize] / 20 + self.time_increment / 2
     }
 
-    pub fn calculate_move_time_basic(time_left: Duration, increment: Duration) -> Duration {
-        time_left / 20 + increment / 2
+    pub fn calculate_move_time_basic(time_left: Duration, enemy_time_left: Option<Duration>, increment: Duration, enemy_increment: Option<Duration>) -> Duration {
+        let out = time_left / 20 + increment / 2;
+        Duration::min(time_left, out)
     }
 
     pub fn set_board(&mut self, board: Board) {

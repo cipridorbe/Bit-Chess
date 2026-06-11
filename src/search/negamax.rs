@@ -1,4 +1,4 @@
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
 
 use once_cell::sync::Lazy;
 
@@ -6,44 +6,63 @@ use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen
 
 pub const TIMEOUT_MOD: u64 = 1 << 12;
 
-pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, Eval, u8, u64) {
+pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>, end: Option<Instant>) -> (Option<Move>, Eval, u8, u64) {
     search_state.new_search();
+    crate::log!("=== search start  fen={} max_depth={} end={:?} ===", board.to_fen(), depth, end);
     let mut threads = Vec::new();
     let fake_stop_flag = Arc::new(AtomicBool::new(false));
-    for _ in 1..NUM_THREADS {
+    for t in 1..NUM_THREADS {
         let mut cloned_search_state = search_state.new_helper_thread();
         let mut cloned_board = board.clone();
         let cloned_stop_flag = Arc::clone(&fake_stop_flag);
+        crate::log!("  spawning helper thread {}", t);
         let thread = std::thread::spawn(move || {
-            iterative_deepening(&mut cloned_board, &mut cloned_search_state, depth, &cloned_stop_flag)
+            iterative_deepening(&mut cloned_board, &mut cloned_search_state, depth, &cloned_stop_flag, end)
         });
         threads.push(thread);
     }
 
-    let (mv, eval, depth, mut nodes_visted) = iterative_deepening(board, search_state, depth, stop_flag);
+    let (mv, eval, reached, mut nodes_visited) = iterative_deepening(board, search_state, depth, stop_flag, end);
     fake_stop_flag.store(true, Ordering::Relaxed);
     for thread in threads {
         if let Ok((_, _, _, nodes)) = thread.join() {
-            nodes_visted += nodes;
+            nodes_visited += nodes;
         }
     }
 
-    (mv, eval, depth, nodes_visted)
+    crate::log!("=== search done  best={} eval={} depth={} nodes={} ===",
+        mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".into()), eval, reached, nodes_visited);
+    (mv, eval, reached, nodes_visited)
 }
 
-pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth: u8, stop_flag: &Arc<AtomicBool>) -> (Option<Move>, Eval, u8, u64) {
+pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth: u8, stop_flag: &Arc<AtomicBool>, end: Option<Instant>) -> (Option<Move>, Eval, u8, u64) {
     let mut best_move = None;
     let mut score = 0;
     let mut reached_depth = 0;
+    let mut last_iteration_duration = Duration::ZERO;
     for depth in 1..=max_depth {
+        let start = Instant::now();
+        if let Some(end) = end {
+            let remaining = end.saturating_duration_since(start);
+            let predicted = last_iteration_duration.mul_f32(1.0);
+            crate::log!("  depth={} remaining={}ms predicted={}ms", depth, remaining.as_millis(), predicted.as_millis());
+            if remaining < predicted {
+                crate::log!("  -> early exit at depth {}", depth);
+                break;
+            }
+        }
         state.max_depth = depth + depth / 2;
         let (mv, current_score) = negamax(stop_flag, board, state, depth, 0, -INF, INF, false);
         if stop_flag.load(Ordering::Relaxed) {
+            crate::log!("  depth={} stopped by flag  best_so_far={}", depth, best_move.map(|m: Move| m.to_uci()).unwrap_or_else(|| "none".into()));
             break;
         }
         best_move = mv;
         score = current_score;
         reached_depth = depth;
+        last_iteration_duration = Instant::now() - start;
+        crate::log!("  depth={} score={} move={} elapsed={}ms",
+            depth, score, best_move.map(|m: Move| m.to_uci()).unwrap_or_else(|| "none".into()), last_iteration_duration.as_millis());
     }
     (best_move, score, reached_depth, state.node_count)
 }

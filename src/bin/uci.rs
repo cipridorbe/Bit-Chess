@@ -40,17 +40,18 @@ fn parse_movetime(tokens: &[&str], colour: Colour) -> Option<Duration> {
         return Some(Duration::from_millis(mt));
     }
 
-    let (my_time, my_inc) = match colour {
-        Colour::White => (wtime?, winc),
-        Colour::Black => (btime?, binc),
+    let (my_time, my_inc, enemy_time, enemy_inc) = match colour {
+        Colour::White => (wtime?, winc, btime, binc),
+        Colour::Black => (btime?, binc, wtime, winc),
     };
 
     let budget = Game::calculate_move_time_basic(
         Duration::from_millis(my_time),
+        enemy_time.map(|t| Duration::from_millis(t)),
         Duration::from_millis(my_inc),
+        Some(Duration::from_millis(enemy_inc)),
     );
-    let cap = Duration::from_millis(my_time.saturating_sub(50).max(10));
-    Some(budget.clamp(Duration::from_millis(10), cap))
+    Some(budget)
 }
 
 fn end_search(stop: &Arc<AtomicBool>, handle: &mut Option<thread::JoinHandle<Game>>, game: &mut Option<Game>) {
@@ -61,6 +62,7 @@ fn end_search(stop: &Arc<AtomicBool>, handle: &mut Option<thread::JoinHandle<Gam
 }
 
 fn main() {
+    bitchess::logger::init(r"C:\Users\cipri\projects\bitchess\bitchess.log");
     let stdin = io::stdin();
     let mut game: Option<Game> = Some(Game::new_infinite(None, None, None));
     let mut search_handle: Option<thread::JoinHandle<Game>> = None;
@@ -68,6 +70,7 @@ fn main() {
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
+        bitchess::log!(">> {}", line);
         let tokens: Vec<&str> = line.split_whitespace().collect();
         if tokens.is_empty() { continue; }
 
@@ -124,6 +127,7 @@ fn main() {
                 let handle = thread::spawn(move || {
                     let (mv, _eval, _reached_depth, _nodes) = g.find_best_move(depth, time, Some(stop_clone));
                     let bestmove = format!("bestmove {}", mv.map(|m| m.to_uci()).unwrap_or_else(|| "0000".to_string()));
+                    bitchess::log!("<< {}", bestmove);
                     println!("{}", bestmove);
                     io::stdout().flush().unwrap();
                     g

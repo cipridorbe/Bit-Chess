@@ -1,0 +1,225 @@
+>> uci
+>> position startpos
+>> go depth 
+=== search start  fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 max_depth=127 end=None ===
+  spawning helper thread 1
+  spawning helper thread 2
+  spawning helper thread 3
+  depth=1 score=36 move=g1f3 elapsed=0ms
+  depth=1 score=36 move=g1f3 elapsed=0ms
+  depth=1 score=36 move=g1f3 elapsed=0ms
+  depth=2 score=2 move=d2d4 elapsed=0ms
+  depth=1 score=36 move=g1f3 elapsed=0ms
+  depth=2 score=0 move=g1f3 elapsed=0ms
+  depth=2 score=0 move=g1f3 elapsed=0ms
+  depth=2 score=0 move=g1f3 elapsed=0ms
+  depth=3 score=35 move=g1f3 elapsed=0ms
+  depth=3 score=29 move=d2d4 elapsed=0ms
+  depth=3 score=35 move=g1f3 elapsed=0ms
+  depth=4 score=17 move=g1f3 elapsed=0ms
+  depth=4 score=5 move=g1f3 elapsed=0ms
+  depth=3 score=26 move=g1f3 elapsed=0ms
+  depth=4 score=19 move=g1f3 elapsed=0ms
+  depth=5 score=24 move=g1f3 elapsed=0ms
+  depth=4 score=16 move=g1f3 elapsed=0ms
+  depth=5 score=8 move=b1c3 elapsed=1ms
+  depth=5 score=10 move=b1c3 elapsed=0ms
+  depth=5 score=8 move=b1c3 elapsed=1ms
+  depth=6 score=23 move=g1f3 elapsed=1ms
+  depth=6 score=4 move=b1c3 elapsed=1ms
+  depth=6 score=-3 move=b1c3 elapsed=1ms
+  depth=6 score=-6 move=b1c3 elapsed=1ms
+  depth=7 score=13 move=b1c3 elapsed=2ms
+  depth=7 score=4 move=b1a3 elapsed=5ms
+  depth=7 score=18 move=g1f3 elapsed=8ms
+  depth=7 score=-6 move=b2b3 elapsed=8ms
+  depth=8 score=13 move=b2b3 elapsed=9ms
+  depth=8 score=12 move=b1a3 elapsed=7ms
+  depth=8 score=19 move=g1f3 elapsed=6ms
+  depth=8 score=-1 move=b2b3 elapsed=4ms
+  depth=9 score=1 move=b2b3 elapsed=8ms
+  depth=9 score=0 move=b1a3 elapsed=10ms
+  depth=9 score=-5 move=b2b3 elapsed=11ms
+  depth=9 score=-17 move=b1a3 elapsed=33ms
+  depth=10 score=5 move=b2b3 elapsed=22ms
+  depth=10 score=6 move=b2b4 elapsed=45ms
+  depth=11 score=-7 move=b2b4 elapsed=14ms
+  depth=10 score=1 move=b1c3 elapsed=53ms
+  depth=11 score=3 move=b1c3 elapsed=75ms
+  depth=10 score=30 move=b1c3 elapsed=123ms
+  depth=11 score=3 move=b1c3 elapsed=47ms
+  depth=12 score=0 move=b2b4 elapsed=142ms
+  depth=11 score=-8 move=b1c3 elapsed=125ms
+  depth=12 score=14 move=b1c3 elapsed=70ms
+  depth=13 score=11 move=g1h3 elapsed=173ms
+  depth=13 score=5 move=g2g3 elapsed=230ms
+  depth=12 score=10 move=b1c3 elapsed=257ms
+  depth=13 score=0 move=g2g3 elapsed=121ms
+  depth=14 score=20 move=g2g3 elapsed=312ms
+  depth=14 score=7 move=g2g3 elapsed=711ms
+  depth=15 score=-5 move=g2g3 elapsed=1200ms
+  depth=15 score=13 move=b1c3 elapsed=791ms
+  depth=12 score=18 move=b1c3 elapsed=2061ms
+  depth=14 score=13 move=g1h3 elapsed=1813ms
+  depth=15 score=16 move=b1c3 elapsed=140ms
+  depth=13 score=5 move=b1c3 elapsed=542ms
+  depth=16 score=10 move=b1c3 elapsed=1112ms
+  depth=16 score=4 move=g2g3 elapsed=2049ms
+  depth=14 score=19 move=b1c3 elapsed=1860ms
+  depth=17 score=-2 move=b1c3 elapsed=1384ms
+>> stop
+  depth=17 stopped by flag  best_so_far=g2g3
+  depth=18 stopped by flag  best_so_far=b1c3
+  depth=15 stopped by flag  best_so_far=b1c3
+  depth=16 stopped by flag  best_so_far=b1c3
+=== search done  best=g2g3 eval=4 depth=16 nodes=87710307 ===
+<< bestmove g2g3
+>> go depth 12
+=== search start  fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 max_depth=12 end=None ===
+  spawning helper thread 1
+  spawning helper thread 2
+  spawning helper thread 3
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=5 score=-3 move=b1c3 elapsed=0ms
+  depth=5 score=-3 move=b1c3 elapsed=0ms
+  depth=5 score=-3 move=b1c3 elapsed=1ms
+  depth=5 score=-3 move=b1c3 elapsed=0ms
+  depth=6 score=3 move=b1c3 elapsed=1ms
+  depth=6 score=-2 move=b1c3 elapsed=1ms
+  depth=6 score=3 move=b1c3 elapsed=1ms
+  depth=6 score=-2 move=b1c3 elapsed=1ms
+  depth=7 score=3 move=b1c3 elapsed=1ms
+  depth=7 score=3 move=b1c3 elapsed=1ms
+  depth=7 score=3 move=b1c3 elapsed=2ms
+  depth=7 score=3 move=b1c3 elapsed=2ms
+  depth=8 score=-2 move=b1c3 elapsed=2ms
+  depth=8 score=6 move=b1c3 elapsed=3ms
+  depth=8 score=6 move=b1c3 elapsed=4ms
+  depth=8 score=-3 move=b1c3 elapsed=5ms
+  depth=9 score=6 move=b1c3 elapsed=9ms
+  depth=9 score=11 move=b1c3 elapsed=14ms
+  depth=9 score=8 move=b1c3 elapsed=15ms
+  depth=9 score=-7 move=g2g3 elapsed=31ms
+  depth=10 score=4 move=b1c3 elapsed=25ms
+  depth=10 score=10 move=b1c3 elapsed=31ms
+  depth=11 score=6 move=b1c3 elapsed=11ms
+  depth=10 score=0 move=b1c3 elapsed=12ms
+  depth=11 score=-1 move=b1c3 elapsed=12ms
+  depth=10 score=-1 move=b1c3 elapsed=47ms
+  depth=11 score=-1 move=b1c3 elapsed=6ms
+  depth=11 score=1 move=b1c3 elapsed=38ms
+  depth=12 score=3 move=b1c3 elapsed=63ms
+  depth=12 stopped by flag  best_so_far=b1c3
+  depth=12 stopped by flag  best_so_far=b1c3
+  depth=12 stopped by flag  best_so_far=b1c3
+=== search done  best=b1c3 eval=3 depth=12 nodes=2608500 ===
+<< bestmove b1c3
+>> go depth 15
+=== search start  fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 max_depth=15 end=None ===
+  spawning helper thread 1
+  spawning helper thread 2
+  spawning helper thread 3
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=2 score=-2 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=3 score=3 move=b1c3 elapsed=0ms
+  depth=4 score=5 move=b1c3 elapsed=0ms
+  depth=5 score=6 move=b1c3 elapsed=0ms
+  depth=5 score=6 move=b1c3 elapsed=0ms
+  depth=5 score=6 move=b1c3 elapsed=0ms
+  depth=5 score=6 move=b1c3 elapsed=0ms
+  depth=6 score=3 move=b1c3 elapsed=0ms
+  depth=6 score=3 move=b1c3 elapsed=1ms
+  depth=6 score=3 move=b1c3 elapsed=1ms
+  depth=7 score=0 move=b1c3 elapsed=0ms
+  depth=7 score=0 move=b1c3 elapsed=0ms
+  depth=7 score=3 move=b1c3 elapsed=0ms
+  depth=6 score=26 move=b1c3 elapsed=2ms
+  depth=7 score=19 move=b1c3 elapsed=0ms
+  depth=8 score=14 move=b1c3 elapsed=7ms
+  depth=9 score=19 move=b1c3 elapsed=3ms
+  depth=8 score=16 move=b1c3 elapsed=13ms
+  depth=9 score=19 move=b1c3 elapsed=0ms
+  depth=8 score=29 move=b1c3 elapsed=12ms
+  depth=8 score=29 move=b1c3 elapsed=14ms
+  depth=9 score=19 move=b1c3 elapsed=0ms
+  depth=9 score=19 move=b1c3 elapsed=0ms
+  depth=10 score=24 move=b1c3 elapsed=15ms
+  depth=10 score=22 move=b1c3 elapsed=19ms
+  depth=11 score=27 move=b1c3 elapsed=11ms
+  depth=10 score=17 move=b1c3 elapsed=25ms
+  depth=10 score=15 move=b1c3 elapsed=47ms
+  depth=12 score=23 move=b1c3 elapsed=26ms
+  depth=11 score=-2 move=b1c3 elapsed=70ms
+  depth=11 score=31 move=b1c3 elapsed=46ms
+  depth=11 score=8 move=b1c3 elapsed=91ms
+  depth=12 score=24 move=b1c3 elapsed=4ms
+  depth=12 score=28 move=b1c3 elapsed=39ms
+  depth=13 score=25 move=b1c3 elapsed=89ms
+  depth=13 score=3 move=b1c3 elapsed=38ms
+  depth=12 score=32 move=b1c3 elapsed=127ms
+  depth=13 score=25 move=b1c3 elapsed=3ms
+  depth=13 score=13 move=b1c3 elapsed=156ms
+  depth=14 score=28 move=b1c3 elapsed=203ms
+  depth=14 score=40 move=b1c3 elapsed=91ms
+  depth=14 score=45 move=b1c3 elapsed=158ms
+  depth=15 score=19 move=b1c3 elapsed=164ms
+  depth=15 score=12 move=b1c3 elapsed=205ms
+  depth=15 score=8 move=b1c3 elapsed=220ms
+  depth=14 score=3 move=b1c3 elapsed=485ms
+  depth=15 score=11 move=b1c3 elapsed=52ms
+=== search done  best=b1c3 eval=11 depth=15 nodes=11253425 ===
+<< bestmove b1c3
+>> go depth 3
+=== search start  fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 max_depth=3 end=None ===
+  spawning helper thread 1
+  spawning helper thread 2
+  spawning helper thread 3
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=18 move=b1c3 elapsed=0ms
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=18 move=b1c3 elapsed=0ms
+  depth=3 score=24 move=b1c3 elapsed=0ms
+  depth=1 stopped by flag  best_so_far=none
+  depth=3 stopped by flag  best_so_far=b1c3
+  depth=1 stopped by flag  best_so_far=none
+=== search done  best=b1c3 eval=24 depth=3 nodes=900 ===
+<< bestmove b1c3
+>> go depth 2
+=== search start  fen=rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1 max_depth=2 end=None ===
+  spawning helper thread 1
+  spawning helper thread 2
+  spawning helper thread 3
+  depth=1 score=33 move=b1c3 elapsed=0ms
+  depth=2 score=18 move=b1c3 elapsed=0ms
+  depth=1 stopped by flag  best_so_far=none
+  depth=1 stopped by flag  best_so_far=none
+  depth=1 stopped by flag  best_so_far=none
+=== search done  best=b1c3 eval=18 depth=2 nodes=227 ===
+<< bestmove b1c3

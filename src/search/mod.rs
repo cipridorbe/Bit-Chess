@@ -70,7 +70,7 @@ mod test {
                     stop_timer.store(true, Ordering::Relaxed);
                 });
                 let start = Instant::now();
-                let (mv, _eval, depth, nodes) = search(&mut board, &mut state, MAX_PLY, &stop);
+                let (mv, _eval, depth, nodes) = search(&mut board, &mut state, MAX_PLY, &stop, None);
                 let elapsed = start.elapsed();
                 let knps = nodes as f64 / elapsed.as_secs_f64() / 1000.0;
                 total_nodes += nodes;
@@ -183,5 +183,102 @@ mod test {
         eprintln!("ext-stop 100ms test: elapsed={:?}, depth={}, nodes={}", elapsed, depth, nodes);
         assert!(mv.is_some(), "expected a move");
         assert!(elapsed < Duration::from_millis(500), "search took {:?}, did not stop promptly", elapsed);
+    }
+
+    // Prints best move per depth from starting position to diagnose bad opening play.
+    // Run with: cargo test test_opening_moves -- --nocapture
+    #[test]
+    fn test_opening_moves() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        use crate::repr::board::Board;
+        use crate::search::{negamax::search, state::SearchState};
+
+        let mut board = Board::starting_position();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut state = SearchState::new(23, 2, 18);
+
+        eprintln!("multi-threaded search:");
+        eprintln!("{:<6} {:>8} {:>12}  best", "depth", "score", "nodes");
+        for depth in 1..=12u8 {
+            let start = Instant::now();
+            let (mv, score, reached, nodes) = search(&mut board, &mut state, depth, &stop, None);
+            let ms = start.elapsed().as_secs_f64() * 1000.0;
+            let best = mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".to_string());
+            eprintln!("{:<6} {:>8} {:>12}  {}  ({:.1}ms)", reached, score, nodes, best, ms);
+        }
+    }
+
+    // Prints per-depth timing to calibrate the iterative deepening early-exit factor.
+    // Run with: cargo test test_depth_timing -- --nocapture
+    #[test]
+    fn test_depth_timing() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        use crate::eval::INF;
+        use crate::movegen::r#move::Move;
+        use crate::repr::board::Board;
+        use crate::search::{NUM_THREADS, negamax::{negamax, iterative_deepening}, state::SearchState};
+
+        const MAX_TEST_DEPTH: u8 = 10;
+
+        let positions: &[(&str, &[&str])] = &[
+            ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", &[]),
+            ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", &["e2e4", "e7e5", "g1f3", "b8c6"]),
+            ("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", &[]),
+            ("3r2k1/p2r1p1p/1p2p1p1/q4n2/3P4/PQ5P/1P1RNPP1/3R2K1 b - - 0 1", &[]),
+            ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", &[]),
+            ("2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/1B2QPP1/R2R2K1 b - - 0 1", &[]),
+            ("r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3", &["g8f6", "d2d3"]),
+        ];
+
+        for (fen, moves) in positions {
+            let mut board = Board::from_fen(fen);
+            for mv_str in *moves {
+                let mv = Move::from_uci(&board, mv_str);
+                let _ = board.makemove(mv);
+            }
+
+            let stop = Arc::new(AtomicBool::new(false));
+            let fake_stop = Arc::new(AtomicBool::new(false));
+            let mut state = SearchState::new(23, 2, 18);
+            state.new_search();
+
+            // Spawn helper threads running full iterative deepening, same as real search()
+            let mut threads = Vec::new();
+            for _ in 1..NUM_THREADS {
+                let mut helper_state = state.new_helper_thread();
+                let mut helper_board = board.clone();
+                let helper_stop = Arc::clone(&fake_stop);
+                threads.push(std::thread::spawn(move || {
+                    iterative_deepening(&mut helper_board, &mut helper_state, MAX_TEST_DEPTH, &helper_stop, None)
+                }));
+            }
+
+            let label = if moves.is_empty() {
+                fen[..fen.find(' ').unwrap_or(fen.len())].to_string()
+            } else {
+                format!("{} ..{}", &fen[..fen.find(' ').unwrap_or(fen.len())], moves.last().unwrap())
+            };
+            eprintln!("\n{}", label);
+            eprintln!("{:<6} {:>10} {:>7} {:>12}  best", "depth", "ms", "ratio", "nodes");
+
+            // Main thread does its own depth loop with per-depth timing, sharing TT with helpers
+            let mut prev_ms = 0.0f64;
+            let mut prev_nodes = 0u64;
+            for depth in 1..=MAX_TEST_DEPTH {
+                state.max_depth = depth + depth / 2;
+                let start = Instant::now();
+                let (mv, score) = negamax(&stop, &mut board, &mut state, depth, 0, -INF, INF, false);
+                let ms = start.elapsed().as_secs_f64() * 1000.0;
+                let delta_nodes = state.node_count - prev_nodes;
+                let ratio = if prev_ms > 0.5 { ms / prev_ms } else { 0.0 };
+                let best = mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".to_string());
+                eprintln!("{:<6} {:>10.1} {:>7.2}  {:>12}  {} ({})", depth, ms, ratio, delta_nodes, best, score);
+                prev_ms = ms;
+                prev_nodes = state.node_count;
+            }
+
+            fake_stop.store(true, Ordering::Relaxed);
+            for t in threads { let _ = t.join(); }
+        }
     }
 }
