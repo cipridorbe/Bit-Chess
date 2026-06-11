@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 
-use crate::{eval::Eval, movegen::attacks::pawn_attacks, repr::{bitboard::BB, board::Board, colour::Colour, hash::Hash, piece::Piece}, search::state::SearchState, util::{populate_files, populate_files_down, populate_files_up}};
+use crate::{eval::Eval, movegen::attacks::pawn_attacks, repr::{bitboard::BB, board::Board, colour::Colour, hash::Hash, piece::Piece}, search::state::SearchState, test_assert, util::{populate_files, populate_files_down, populate_files_up}};
 
 const FRIEND_BONUS: Eval = 10;
 const ISOLATED_BONUS: Eval = -15;
@@ -51,6 +51,11 @@ pub fn doubled_pawns(pawns: BB) -> BB {
     files & pawns
 }
 
+pub fn pawn_in_file(pawns: BB) -> u8 {
+    let files = populate_files_down(pawns);
+    (files.0 & 0xff) as u8
+}
+
 /// Computes the bonus centiscore determined by pawns
 pub fn pawn_bonus(board: &Board, search_state: &mut SearchState) -> (Eval, Eval) {
     if let Some(entry) = search_state.pawn_table.find(board.state.pawn_hash) {
@@ -93,6 +98,12 @@ pub fn pawn_bonus(board: &Board, search_state: &mut SearchState) -> (Eval, Eval)
     search_state.pawn_table.insert(entry);
 
     (bonus, bonus)
+}
+
+pub fn missing_guards(king: BB, pawns: BB, colour: Colour) -> BB {
+    let next = king | (king & !Board::A_FILE) >> 1 | (king & !Board::H_FILE) << 1;
+    let guards = if colour == Colour::White { next << 8 } else { next >> 8 };
+    guards & !pawns
 }
 
 #[derive(Clone, Copy)]
@@ -148,6 +159,26 @@ impl PawnTable {
         let current = unsafe { &mut *self.table[idx as usize].get() };
         *current = pawn_table_entry;
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum FileStatus {
+    Open,
+    WhiteOnly,
+    BlackOnly,
+    Closed
+}
+
+impl FileStatus {
+    pub fn new(white_file: bool, black_file: bool) -> Self {
+        unsafe { std::mem::transmute(((white_file as u8) << 1) | black_file as u8) }
+    }
+}
+
+pub fn file_status(white_files: u8, black_files: u8, file: u8) -> FileStatus {
+    test_assert!(file < 8);
+    let mask = 1 << file;
+    FileStatus::new(white_files & mask != 0, black_files & mask != 0)
 }
 
 #[cfg(test)]
