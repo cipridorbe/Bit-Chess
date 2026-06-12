@@ -54,6 +54,32 @@ impl Game {
         Game::new_finite(Duration::from_secs(60*1), Duration::from_secs(2), None, None, None)
     }
 
+    pub fn new_infinite_default() -> Self {
+        Game::new_with_state(None, Duration::ZERO, SearchState::new_default())
+    }
+
+    pub fn new_10min_default() -> Self {
+        Game::new_with_state(Some(Duration::from_secs(60*10)), Duration::from_secs(0), SearchState::new_default())
+    }
+
+    pub fn new_3min_default() -> Self {
+        Game::new_with_state(Some(Duration::from_secs(60*3)), Duration::from_secs(1), SearchState::new_default())
+    }
+
+    pub fn new_1min_default() -> Self {
+        Game::new_with_state(Some(Duration::from_secs(60*1)), Duration::from_secs(2), SearchState::new_default())
+    }
+
+    fn new_with_state(total_time: Option<Duration>, time_increment: Duration, search_state: SearchState) -> Self {
+        Game {
+            board: Board::starting_position(),
+            total_time,
+            time_increment,
+            time_left: [total_time.unwrap_or(Duration::ZERO); 2],
+            search_state,
+        }
+    }
+
     pub fn game_over_score(&mut self) -> Option<Eval> {
         if self.board.is_rule_draw() {
             return Some(0);

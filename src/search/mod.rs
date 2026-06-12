@@ -1,4 +1,4 @@
-pub const MAX_PLY: u8 = 127;
+pub const MAX_PLY: u8 = 64;
 pub const NUM_THREADS: u8 = 4;
 
 pub mod negamax;
@@ -51,7 +51,7 @@ mod test {
 
         const TIME_PER_POSITION: Duration = Duration::from_secs(1);
         const MOVES_PER_POSITION: usize = 4;
-        const VERBOSE: bool = false;
+        const VERBOSE: bool = true;
 
         let mut total_nodes: u64 = 0;
         let mut total_depth: u32 = 0;
@@ -60,7 +60,7 @@ mod test {
 
         for &fen in BENCH_POSITIONS {
             let mut board = Board::from_fen(fen);
-            let mut state = SearchState::new(23, 2, 18);
+            let mut state = SearchState::new_default();
             if VERBOSE { eprintln!("\n{}", fen); }
             for i in 0..MOVES_PER_POSITION {
                 let stop = Arc::new(AtomicBool::new(false));
@@ -70,7 +70,7 @@ mod test {
                     stop_timer.store(true, Ordering::Relaxed);
                 });
                 let start = Instant::now();
-                let (mv, _eval, depth, nodes) = search(&mut board, &mut state, MAX_PLY, &stop, None);
+                let (mv, _eval, depth, nodes) = search(&mut board, &mut state, MAX_PLY, &stop, Some(start + TIME_PER_POSITION));
                 let elapsed = start.elapsed();
                 let knps = nodes as f64 / elapsed.as_secs_f64() / 1000.0;
                 total_nodes += nodes;
@@ -195,7 +195,7 @@ mod test {
 
         let mut board = Board::starting_position();
         let stop = Arc::new(AtomicBool::new(false));
-        let mut state = SearchState::new(23, 2, 18);
+        let mut state = SearchState::new_default();
 
         eprintln!("multi-threaded search:");
         eprintln!("{:<6} {:>8} {:>12}  best", "depth", "score", "nodes");
@@ -239,7 +239,7 @@ mod test {
 
             let stop = Arc::new(AtomicBool::new(false));
             let fake_stop = Arc::new(AtomicBool::new(false));
-            let mut state = SearchState::new(23, 2, 18);
+            let mut state = SearchState::new_default();
             state.new_search();
 
             // Spawn helper threads running full iterative deepening, same as real search()

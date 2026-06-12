@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{eval::pawn::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
+use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
 
 #[derive(Clone)]
 pub struct SearchState {
@@ -11,9 +11,14 @@ pub struct SearchState {
     pub counter_move: [[Option<Move>; 64]; 64],
     pub max_depth: u8,
     pub node_count: u64,
+    pub stop_search: bool
 }
 
 impl SearchState {
+    pub fn new_default() -> Self {
+        SearchState::new(23, 2, 20)
+    }
+
     pub fn new(tt_bits: u8, tt_generation_cutoff: u8, pawn_table_bits: u8) -> Self {
         SearchState {
             tt: Arc::new(TT::new(tt_bits, tt_generation_cutoff)),
@@ -23,6 +28,7 @@ impl SearchState {
             counter_move: [[None; 64]; 64],
             max_depth: 0,
             node_count: 0,
+            stop_search: false,
         }
     }
 
@@ -39,7 +45,8 @@ impl SearchState {
             }
         }
         self.counter_move = [[None; 64]; 64];
-        self.node_count = 0
+        self.node_count = 0;
+        self.stop_search = false;
     }
 
     pub fn new_helper_thread(&self) -> Self {
@@ -51,6 +58,7 @@ impl SearchState {
             counter_move: self.counter_move.clone(),
             max_depth: self.max_depth,
             node_count: 0,
+            stop_search: false
         }
     }
 

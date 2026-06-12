@@ -167,3 +167,16 @@ pub static SEGMENT_DIAGONAL: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
     }
     table
 });
+
+pub static KING_DISTANCE: Lazy<[[u8; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[0; 64]; 64];
+    for sq1 in Square::all() {
+        let (r1, f1) = sq1.rank_file();
+        for sq2  in Square::all() {
+            let (r2, f2) = sq2.rank_file();
+            let (dr, df) = (r1.abs_diff(r2), f1.abs_diff(f2));
+            table[sq1 as usize][sq2 as usize] = u8::max(dr, df);
+        }
+    }
+    table
+});

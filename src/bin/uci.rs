@@ -63,7 +63,7 @@ fn end_search(stop: &Arc<AtomicBool>, handle: &mut Option<thread::JoinHandle<Gam
 
 fn main() {
     let stdin = io::stdin();
-    let mut game: Option<Game> = Some(Game::new_infinite(None, None, None));
+    let mut game: Option<Game> = Some(Game::new_infinite_default());
     let mut search_handle: Option<thread::JoinHandle<Game>> = None;
     let mut stop = Arc::new(AtomicBool::new(false));
 
@@ -85,7 +85,7 @@ fn main() {
             }
             "ucinewgame" => {
                 end_search(&stop, &mut search_handle, &mut game);
-                game = Some(Game::new_infinite(None, None, None));
+                game = Some(Game::new_infinite_default());
             }
             "position" => {
                 end_search(&stop, &mut search_handle, &mut game);

@@ -62,10 +62,14 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     state.node_count += 1;
 
     // if stop flag is set, stop the search
-    if state.node_count % TIMEOUT_MOD == 0 || depth > 5 {
+    if state.node_count % TIMEOUT_MOD == 0 {
         if stop_flag.load(Ordering::Relaxed) {
+            state.stop_search = true;
             return (None, 0);
         }
+    }
+    if state.stop_search {
+        return (None, 0);
     }
 
     // leaf node. Get quiescence score for a more accurate/stable score
@@ -231,7 +235,7 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
     }
 
     // consider stand pat (not capturing)
-    let stand_pat = partial_relative_eval(board, alpha, beta);
+    let stand_pat = partial_relative_eval(board, state, alpha, beta);
     if stand_pat > alpha {
         alpha = stand_pat;
     }

@@ -1,7 +1,7 @@
-use crate::{repr::{board::Board, colour::Colour}, search::MAX_PLY};
+use crate::{eval::pawnking::pawn_bonus, movegen::attacks::pawn_attacks, repr::{board::Board, colour::Colour, piece::Piece}, search::{MAX_PLY, state::SearchState}};
 
 pub mod pst;
-pub mod pawn;
+pub mod pawnking;
 pub mod king;
 
 pub type Eval = i16;
@@ -12,24 +12,25 @@ pub const MATE_CUTOFF: Eval = MATE - MAX_PLY as Eval * 2;
 
 pub const EVAL_BONUS_DELTA: Eval = 200;
 
-pub fn partial_relative_eval(board: &Board, alpha: Eval, beta: Eval) -> Eval {
+pub fn partial_relative_eval(board: &Board, search_state: &mut SearchState, alpha: Eval, beta: Eval) -> Eval {
     let mult = if board.colour == Colour::White { 1 } else { -1 };
     let partial_eval = phase_eval(board.state.phase_unbounded, board.state.mg_eval, board.state.eg_eval);
     if partial_eval <= alpha - EVAL_BONUS_DELTA || partial_eval >= beta + EVAL_BONUS_DELTA {
         mult * partial_eval
     } else {
-        mult * (partial_eval + bonus_eval(board))
+        mult * (partial_eval + bonus_eval(board, search_state))
     }
 }
 
-pub fn relative_eval(board: &Board) -> Eval {
+pub fn relative_eval(board: &Board, search_state: &mut SearchState) -> Eval {
     let mult = if board.colour == Colour::White { 1 } else { -1 };
     let partial_eval = phase_eval(board.state.phase_unbounded, board.state.mg_eval, board.state.eg_eval);
-    mult * (partial_eval + bonus_eval(board))
+    mult * (partial_eval + bonus_eval(board, search_state))
 }
 
-pub fn bonus_eval(board: &Board) -> Eval {
-    0
+pub fn bonus_eval(board: &Board, search_state: &mut SearchState) -> Eval {
+    let entry = pawn_bonus(board, search_state);
+    phase_eval(board.state.phase_unbounded, entry.mg_eval, entry.eg_eval)
 }
 
 fn phase_eval(phase_unbounded: u8, mg_eval: Eval, eg_eval: Eval) -> Eval {
