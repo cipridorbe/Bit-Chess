@@ -7,7 +7,7 @@ STOCKFISH="/c/Program Files/stockfish/stockfish-windows-x86-64-avx2.exe"
 
 # ── Match settings ─────────────────────────────────────────────────────────────
 GAMES=100
-TC="60+2"            # time control: 1 minute + 2 second increment
+TC="60+1"            # time control: 1 minute + 2 second increment
 STOCKFISH_ELO=2000   # min 1320, max 3190
 
 # ── Args: [-n name] [-d description] [-g games] [-t tc] [-e elo] ─────────────

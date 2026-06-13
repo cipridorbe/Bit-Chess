@@ -16,15 +16,16 @@ BASELINE_COMMIT="HEAD~1"
 NAME=""
 DESCRIPTION=""
 GAMES=50
-DEPTH=8
+TC="60+1"
 
-while getopts "c:n:d:g:" opt; do
+while getopts "c:n:d:g:t:" opt; do
     case "$opt" in
         c) BASELINE_COMMIT="$OPTARG" ;;
         n) NAME="$OPTARG" ;;
         d) DESCRIPTION="$OPTARG" ;;
         g) GAMES="$OPTARG" ;;
-        *) echo "Usage: $0 [-c commit] [-n name] [-d description] [-g games]"; exit 1 ;;
+        t) TC="$OPTARG" ;;
+        *) echo "Usage: $0 [-c commit] [-n name] [-d description] [-g games] [-t tc]"; exit 1 ;;
     esac
 done
 
@@ -71,7 +72,7 @@ git stash pop -q 2>/dev/null
     echo "# New:         $NEW_HASH (HEAD)"
     echo "# Baseline:    $BASELINE_HASH ($BASELINE_COMMIT)"
     [ -n "$DESCRIPTION" ] && echo "# Description: $DESCRIPTION"
-    echo "# Games:       $GAMES  Depth: $DEPTH"
+    echo "# Games:       $GAMES  TC: $TC"
     echo "#"
 } > "$OUTPUT"
 
@@ -80,8 +81,8 @@ echo "New: $NEW_HASH  vs  Baseline: $BASELINE_HASH"
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 "$CUTECHESS" \
-    -engine name="New_${NEW_HASH}"      proto=uci cmd="./target/release/uci_new.exe" depth="$DEPTH" tc=inf \
-    -engine name="Old_${BASELINE_HASH}" proto=uci cmd="./target/release/uci_old.exe" depth="$DEPTH" tc=inf \
+    -engine name="New_${NEW_HASH}"      proto=uci cmd="./target/release/uci_new.exe" tc="$TC" \
+    -engine name="Old_${BASELINE_HASH}" proto=uci cmd="./target/release/uci_old.exe" tc="$TC" \
     -games "$GAMES" \
     -pgnout "$OUTPUT" \
     -ratinginterval 10

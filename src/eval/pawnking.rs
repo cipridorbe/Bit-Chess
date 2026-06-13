@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 
-use crate::{eval::Eval, movegen::attacks::pawn_attacks, repr::{bitboard::BB, board::Board, colour::Colour, hash::Hash, piece::Piece}, search::state::SearchState, test_assert, util::{populate_files, populate_files_down, populate_files_up}};
+use crate::{eval::{Eval, status::FileStatus}, movegen::attacks::pawn_attacks, repr::{bitboard::BB, board::Board, colour::Colour, hash::Hash, piece::Piece}, search::state::SearchState, test_assert, util::{populate_files, populate_files_down, populate_files_up}};
 
 const FRIEND_BONUS: Eval = 10;
 const ISOLATED_BONUS: Eval = -15;
@@ -10,7 +10,7 @@ const PROTECTED_PASSED_PAWN_BONUS: Eval = 25;
 const BACKWARD_PAWN_BONUS: Eval = -20;
 const PAWN_ISLAND_BONUS: Eval = -10;
 
-const MISSING_GUARD_BONUS: Eval = -20;
+const MISSING_GUARD_BONUS: Eval = -30;
 const KING_DISTANCE_BONUS: [Eval; 8] = [0, 0, 50, 40, 30, 20, 10, 0];
 
 
@@ -117,7 +117,7 @@ pub fn pawn_bonus(board: &Board, search_state: &mut SearchState) -> PawnTableEnt
     bonus += (white_friends.count_ones() as Eval - black_friends.count_ones() as Eval) * FRIEND_BONUS;
     bonus += (white_isolated.count_ones() as Eval - black_isolated.count_ones() as Eval) * ISOLATED_BONUS;
     bonus += (white_doubled.count_ones() as Eval - black_doubled.count_ones() as Eval) * DOUBLED_BONUS;
-    bonus += (white_islands.count_ones() as Eval - black_islands.count_ones() as Eval) * PAWN_ISLAND_BONUS;
+    bonus += (white_islands as Eval - black_islands as Eval) * PAWN_ISLAND_BONUS;
     bonus += (white_backward.count_ones() as Eval - black_backward.count_ones() as Eval) * BACKWARD_PAWN_BONUS;
     bonus += (white_protected_passed.count_ones() as Eval - black_protected_passed.count_ones() as Eval) * PROTECTED_PASSED_PAWN_BONUS;
     eg_bonus += ((white_passed & RANK2).count_ones() as Eval - (black_passed & RANK7).count_ones() as Eval) * RANK_BONUS[0];
@@ -150,7 +150,7 @@ pub fn king_bonus(white_king: BB, white_pawns: BB, white_files: u8, black_king: 
     let wkfile = FileStatus::from_files(white_files, black_files, wk_square_file);
     let bkfile = FileStatus::from_files(white_files, black_files, bk_square_file);
     mg_bonus += wkfile.king_bonus(Colour::White);
-    mg_bonus += bkfile.king_bonus(Colour::Black);
+    mg_bonus -= bkfile.king_bonus(Colour::Black);
     if wk_square_file != 0 {
         let status = FileStatus::from_files(white_files, black_files, wk_square_file - 1);
         mg_bonus += status.king_bonus(Colour::White);
@@ -161,11 +161,11 @@ pub fn king_bonus(white_king: BB, white_pawns: BB, white_files: u8, black_king: 
     }
     if bk_square_file != 0 {
         let status = FileStatus::from_files(white_files, black_files, bk_square_file - 1);
-        mg_bonus += status.king_bonus(Colour::Black);
+        mg_bonus -= status.king_bonus(Colour::Black);
     }
     if bk_square_file != 7 {
         let status = FileStatus::from_files(white_files, black_files, bk_square_file + 1);
-        mg_bonus += status.king_bonus(Colour::Black);
+        mg_bonus -= status.king_bonus(Colour::Black);
     }
     (mg_bonus, eg_bonus)
 }
@@ -232,36 +232,6 @@ impl PawnTable {
         pawn_table_entry.pawn_hash = Hash(0);
         *current = pawn_table_entry;
         current.pawn_hash = original_hash;
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum FileStatus {
-    Open,
-    WhiteOnly,
-    BlackOnly,
-    Closed
-}
-
-impl FileStatus {
-    const FILE_STATUS_BONUS_WHITE: [Eval; 4] = [-40, 0, -20, 10];
-    const FILE_STATUS_BONUS_BLACK: [Eval; 4] = [40, 20, 0, -10];
-
-    pub fn new(white_file: bool, black_file: bool) -> Self {
-        unsafe { std::mem::transmute(((black_file as u8) << 1) | white_file as u8) }
-    }
-
-    pub fn from_files(white_files: u8, black_files: u8, file: u8) -> Self {
-        test_assert!(file < 8);
-        let mask = 1 << file;
-        FileStatus::new(white_files & mask != 0, black_files & mask != 0)
-    }
- 
-    pub fn king_bonus(self, colour: Colour) -> Eval {
-        match colour {
-            Colour::White => FileStatus::FILE_STATUS_BONUS_WHITE[self as usize],
-            Colour::Black => FileStatus::FILE_STATUS_BONUS_BLACK[self as usize],
-        }
     }
 }
 

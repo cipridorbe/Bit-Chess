@@ -43,6 +43,9 @@ impl Board {
     pub const RANK_7: BB = BB::new(0x00ff000000000000);
     pub const RANK_8: BB = BB::new(0xff00000000000000);
 
+    pub const TOP: BB = BB::new(0xffffffff00000000);
+    pub const BOTTOM: BB = BB::new(0x00000000ffffffff);
+
     pub fn starting_position() -> Self {
         Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
     }

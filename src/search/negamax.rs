@@ -61,15 +61,16 @@ pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth
 pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, depth: u8, ply: u8, mut alpha: Eval, mut beta: Eval, null_move_allowed: bool) -> (Option<Move>, Eval) {
     state.node_count += 1;
 
+    if state.stop_search {
+        return (None, 0);
+    }
+
     // if stop flag is set, stop the search
     if state.node_count % TIMEOUT_MOD == 0 {
         if stop_flag.load(Ordering::Relaxed) {
             state.stop_search = true;
             return (None, 0);
         }
-    }
-    if state.stop_search {
-        return (None, 0);
     }
 
     // leaf node. Get quiescence score for a more accurate/stable score
@@ -114,7 +115,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     // If no tt move is found, find the best move by performing a shallower search
     // TODO: test if pv_node improves speed
-    if tt_move.is_none() && depth >= 4 {
+    if tt_move.is_none() && depth >= 4 && is_pv {
         let new_depth = depth / 2 + 1;
         tt_move = negamax(stop_flag, board, state, new_depth, ply, alpha, beta, false).0;
     }
@@ -168,6 +169,9 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     let mut i = if tt_move.is_none() { 0 } else { 1 };
     while i < movelist.length {
+        if state.stop_search {
+            return (None, 0);
+        }
         let mv = movelist[i];
         i += 1;
         if !board.is_legal(mv) {
