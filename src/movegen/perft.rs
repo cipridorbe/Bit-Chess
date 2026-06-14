@@ -7,15 +7,8 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     let mut i = 0;
     while i < movelist.length {
         let mv = movelist[i];
-        let unmake = board.makemove(mv);
-        if board.attacks(board.colour) & board[Piece::king(!board.colour)] == 0 {
-            out += perft(board, depth - 1);
-        }
-        board.unmakemove(mv, 0, unmake, Some(&mut movelist));
-        i += 1;
-        continue;
         if board.is_legal(mv) {
-            if depth == 0 {
+            if depth == 1 {
                 out += 1;
                 if mv.is_queen_promotion() { out += 2; }
             } else {

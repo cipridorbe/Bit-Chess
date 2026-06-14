@@ -5,7 +5,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     let mut unmake_info = UnmakeInfo::read(board);
 
     let colour = board.colour;
-    let piece = board[mv.source_square()].expect(&format!("{} {}", mv.to_uci(), board.to_fen()));
+    let piece = board[mv.source_square()].unwrap();
     let mut final_piece = piece;
     let mut final_square = mv.target_square();
     let mut captured = board[mv.target_square()];
