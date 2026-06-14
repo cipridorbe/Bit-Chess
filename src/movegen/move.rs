@@ -24,7 +24,7 @@
 
 use std::{num::NonZeroU16, ops::{Index, IndexMut}};
 
-use crate::{eval::Eval, repr::{board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::see_mvvlva, state::SearchState}, test_assert};
+use crate::{eval::Eval, repr::{board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::{see_mvvlva, see_sign}, state::SearchState}, test_assert};
 
 /// Maximum number of moves that can be made from any position
 pub const MAX_MOVES: usize = 218;
@@ -56,8 +56,10 @@ pub type MoveScore = i16;
 pub const TTSCORE: MoveScore = MoveScore::MAX;
 pub const CAPTURE_BASE_SCORE: MoveScore = 30000;
 pub const POSITIVE_SEE_OFFSET: MoveScore = 500;
+pub const QUEEN_QUIET_PROM_SCORE: MoveScore = 29100;
 pub const KILLERS_SCORE: [MoveScore; 2] = [29000, 28000];
 pub const COUNTERMOVE_SCORE: MoveScore = 27000;
+pub const REGULAR_QUIET_SCORE: MoveScore = 26000;
 pub const MAX_HISTORY_VALUE: MoveScore = 16384;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -196,6 +198,7 @@ impl Move {
         if self.is_capture() {
             return see_mvvlva(board, self);
         } else {
+            if self.is_queen_promotion() { return QUEEN_QUIET_PROM_SCORE; }
             return history[self.source_square() as usize][self.target_square() as usize];
         }
     }
@@ -259,6 +262,14 @@ impl MoveList {
         while i < self.length {
             out[i] = self[i].score(board, tt_move, killers, &search_state.history, counter_move);
             i += 1;
+        }
+        out
+    }
+
+    pub fn quiescense_score(&self, board: &Board) -> [Eval; 218] {
+        let mut out = [0; 218];
+        for i in 0..self.length {
+            out[i] = see_sign(board, self[i]);
         }
         out
     }

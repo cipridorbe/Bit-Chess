@@ -5,15 +5,15 @@ use crate::{eval::{Eval, status::FileStatus}, movegen::attacks::pawn_attacks, re
 const FRIEND_BONUS: Eval = 10;
 const ISOLATED_BONUS: Eval = -15;
 const DOUBLED_BONUS: Eval = -10;
-const RANK_BONUS: [Eval; 6] = [10, 20, 40, 70, 120, 200];
+const RANK_BONUS: [Eval; 6] = [10, 20, 35, 60, 100, 150];
 const PROTECTED_PASSED_PAWN_BONUS: Eval = 25;
 const BACKWARD_PAWN_BONUS: Eval = -20;
 const PAWN_ISLAND_BONUS: Eval = -10;
 
-const MISSING_GUARD_BONUS: Eval = -30;
+const MISSING_GUARD_BONUS: Eval = -15;
 const KING_DISTANCE_BONUS: [Eval; 8] = [0, 0, 50, 40, 30, 20, 10, 0];
 
-
+#[inline]
 /// Returns a bitboard of the passed pawns of the current side to play
 pub fn passed_pawns(my_pawns: BB, enemy_pawns: BB, colour: Colour) -> BB {
     if enemy_pawns.count_ones() >= 8 || my_pawns == 0 {
@@ -28,6 +28,7 @@ pub fn passed_pawns(my_pawns: BB, enemy_pawns: BB, colour: Colour) -> BB {
     my_pawns & !blocked
 }
 
+#[inline]
 /// Returns a bitboard containing pawns with at least one pawn next to them
 pub fn friend_pawns(pawns: BB) -> BB {
     let mut left = (pawns & !Board::A_FILE) >> 1;
@@ -39,6 +40,7 @@ pub fn friend_pawns(pawns: BB) -> BB {
     pawns & (left | right)
 }
 
+#[inline]
 /// Returns pawns with no pawns in the neighbouring files
 pub fn isolated_pawns(pawns: BB) -> BB {
     let left = (pawns & !Board::A_FILE) >> 1;
@@ -47,6 +49,7 @@ pub fn isolated_pawns(pawns: BB) -> BB {
     pawns & !files
 }
 
+#[inline]
 /// Returns a bitboard containing pawns in the same files
 pub fn doubled_pawns(pawns: BB) -> BB {
     let populated = populate_files_up(pawns);
@@ -58,11 +61,13 @@ pub fn doubled_pawns(pawns: BB) -> BB {
     files & pawns
 }
 
+#[inline]
 pub fn pawns_in_files(pawns: BB) -> u8 {
     let files = populate_files_down(pawns);
     (files.0 & 0xff) as u8
 }
 
+#[inline]
 pub fn backward_pawns(my_pawns: BB, enemy_pawns: BB, colour: Colour) -> BB {
     let controlled = enemy_pawns | pawn_attacks(enemy_pawns, !colour);
     let defense = pawn_attacks(my_pawns, colour);
@@ -72,6 +77,7 @@ pub fn backward_pawns(my_pawns: BB, enemy_pawns: BB, colour: Colour) -> BB {
     }
 }
 
+#[inline]
 pub fn pawn_islands_count(pawn_files: u8) -> u8 {
     let islands = pawn_files & ((!pawn_files << 1) | 1);
     islands.count_ones() as u8 
@@ -215,6 +221,7 @@ impl PawnTable {
         }
     }
 
+    #[inline]
     pub fn find(&self, pawn_hash: Hash) -> Option<PawnTableEntry> {
         let idx = pawn_hash.0 & self.mask;
         let entry = unsafe { *self.table[idx as usize].get() } ;
@@ -225,6 +232,7 @@ impl PawnTable {
         }
     }
 
+    #[inline]
     pub fn insert(&self, mut pawn_table_entry: PawnTableEntry) {
         let idx = pawn_table_entry.pawn_hash.0 & self.mask;
         let current = unsafe { &mut *self.table[idx as usize].get() };

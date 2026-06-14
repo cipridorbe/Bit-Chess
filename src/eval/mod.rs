@@ -2,7 +2,6 @@ use crate::{eval::{pawnking::pawn_bonus, status::FileStatus}, movegen::attacks::
 
 pub mod pst;
 pub mod pawnking;
-pub mod king;
 pub mod status;
 
 pub type Eval = i16;
@@ -11,8 +10,8 @@ pub const INF: Eval = 31000;
 pub const MATE: Eval = INF - 1;
 pub const MATE_CUTOFF: Eval = MATE - MAX_PLY as Eval * 2;
 
-pub const EVAL_BONUS_DELTA_OUTER: Eval = 110;
-pub const EVAL_BONUS_DELTA_INNER: Eval = 60;
+pub const EVAL_BONUS_DELTA_OUTER: Eval = 105;
+pub const EVAL_BONUS_DELTA_INNER: Eval = 55;
 
 const BATTERY_BONUS: Eval = 25;
 const OUTPOST_BONUS: Eval = 40;
@@ -34,7 +33,7 @@ pub fn partial_relative_eval(board: &Board, search_state: &mut SearchState, alph
         return mult * partial_eval;
     }
     partial_eval += bonus_eval_non_pawn(board, entry.files);
-    partial_eval
+    mult * partial_eval
 }
 
 pub fn relative_eval(board: &Board, search_state: &mut SearchState) -> Eval {
@@ -43,13 +42,13 @@ pub fn relative_eval(board: &Board, search_state: &mut SearchState) -> Eval {
     mult * (partial_eval + bonus_eval(board, search_state))
 }
 
-pub fn bonus_eval(board: &Board, search_state: &mut SearchState) -> Eval {
+fn bonus_eval(board: &Board, search_state: &mut SearchState) -> Eval {
     let entry = pawn_bonus(board, search_state);
     let pawn = phase_eval(board.state.phase_unbounded, entry.mg_eval, entry.eg_eval);
     pawn + bonus_eval_non_pawn(board, entry.files)
 }
 
-pub fn bonus_eval_non_pawn(board: &Board, files: [u8; 2]) -> Eval {
+fn bonus_eval_non_pawn(board: &Board, files: [u8; 2]) -> Eval {
     let mut mg_bonus = 0;
     let mut eg_bonus = 0;
     let (mg, eg) = rook_queen_bonus(board, files);
@@ -63,42 +62,48 @@ pub fn bonus_eval_non_pawn(board: &Board, files: [u8; 2]) -> Eval {
     phase_eval(board.state.phase_unbounded, mg_bonus, eg_bonus)
 }
 
+#[inline]
 fn phase_eval(phase_unbounded: u8, mg_eval: Eval, eg_eval: Eval) -> Eval {
     let phase = phase_unbounded.min(24) as i32;
     ((mg_eval as i32 * phase + eg_eval as i32 * (24 - phase)) / 24) as Eval
 }
 
+impl Board {
+    pub fn pst_eval(&self) -> Eval {
+        let eval = phase_eval(self.state.phase_unbounded, self.state.mg_eval, self.state.eg_eval);
+        if self.colour == Colour::White { eval } else { -eval }
+    }
+}
+
+#[inline]
 fn rook_queen_bonus(board: &Board, files: [u8; 2]) -> (Eval, Eval) {
     let white = board[Piece::WhiteRook] | board[Piece::WhiteQueen];
     let black = board[Piece::BlackRook] | board[Piece::BlackQueen];
     let mut mg_eval = 0;
     let mut eg_eval = 0;
 
-    let mut prev_file = 8;
+    let mut white_per_file = [0u8; 8];
     for square in white.squares() {
-        let file = square.file();
-        if file == prev_file {
-            mg_eval += BATTERY_BONUS;
-        }
-        let file_status = FileStatus::from_files(files[0], files[1], square.file());
+        let file = square.file() as usize;
+        if white_per_file[file] > 0 { mg_eval += BATTERY_BONUS; }
+        white_per_file[file] += 1;
+        let file_status = FileStatus::from_files(files[0], files[1], file as u8);
         mg_eval += file_status.rook_bonus(Colour::White);
-        prev_file = file;
     }
 
-    prev_file = 8;
+    let mut black_per_file = [0u8; 8];
     for square in black.squares() {
-        let file = square.file();
-        if file == prev_file {
-            mg_eval -= BATTERY_BONUS;
-        }
-        let file_status = FileStatus::from_files(files[0], files[1], square.file());
+        let file = square.file() as usize;
+        if black_per_file[file] > 0 { mg_eval -= BATTERY_BONUS; }
+        black_per_file[file] += 1;
+        let file_status = FileStatus::from_files(files[0], files[1], file as u8);
         mg_eval -= file_status.rook_bonus(Colour::Black);
-        prev_file = file;
     }
 
     (mg_eval, eg_eval)
 }
 
+#[inline]
 fn knight_bonus(board: &Board) -> (Eval, Eval) {
     let mut bonus = 0;
     let mut mg_bonus = 0;
@@ -129,7 +134,8 @@ fn knight_bonus(board: &Board) -> (Eval, Eval) {
     (bonus + mg_bonus, bonus + eg_bonus)
 }
 
-pub fn bishop_bonus(board: &Board) -> (Eval, Eval) {
+#[inline]
+fn bishop_bonus(board: &Board) -> (Eval, Eval) {
     let mut bonus = 0;
     let mut mg_bonus = 0;
     let mut eg_bonus = 0;
@@ -152,7 +158,8 @@ pub fn bishop_bonus(board: &Board) -> (Eval, Eval) {
     (bonus + mg_bonus, bonus + eg_bonus)
 }
 
-pub fn slider_mobility(board: &Board) -> (Eval, Eval) {
+#[inline]
+fn slider_mobility(board: &Board) -> (Eval, Eval) {
     let mut bonus = 0;
     let mut mg_bonus = 0;
     let mut eg_bonus = 0;

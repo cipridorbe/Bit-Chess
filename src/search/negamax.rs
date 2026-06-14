@@ -2,9 +2,14 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move}, repr::board::Board, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
-pub const TIMEOUT_MOD: u64 = 1 << 12;
+pub const TIMEOUT_MOD: u64 = 1 << 13;
+
+const FUTILITY_MARGIN: Eval = 150;
+const TT_FUTILITY_MARGIN: Eval = 100;
+const REVERSE_FUTILITY_PRUNING_MARGIN: Eval = 215;
+const DELTA_PRUNING_MARGIN: Eval = 160;
 
 pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop_flag: &Arc<AtomicBool>, end: Option<Instant>) -> (Option<Move>, Eval, u8, u64) {
     search_state.new_search();
@@ -20,8 +25,10 @@ pub fn search(board: &mut Board, search_state: &mut SearchState, depth: u8, stop
         threads.push(thread);
     }
 
+    search_state.fake_stop_flag = Some(Arc::clone(&fake_stop_flag));
     let (mv, eval, reached, mut nodes_visited) = iterative_deepening(board, search_state, depth, stop_flag, end);
     fake_stop_flag.store(true, Ordering::Relaxed);
+    search_state.fake_stop_flag = None;
     for thread in threads {
         if let Ok((_, _, _, nodes)) = thread.join() {
             nodes_visited += nodes;
@@ -69,6 +76,11 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     if state.node_count % TIMEOUT_MOD == 0 {
         if stop_flag.load(Ordering::Relaxed) {
             state.stop_search = true;
+            if state.is_main {
+                if let Some(ref fake_flag) = state.fake_stop_flag {
+                    fake_flag.store(true, Ordering::Relaxed);
+                }
+            }
             return (None, 0);
         }
     }
@@ -87,7 +99,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     if let Some(entry) = state.tt.find(board.state.hash) {
         tt_move = entry.best_move;
         let eval = adjust_retrieve_eval(entry.eval, ply);
-        if entry.depth >= depth && board.state.repetitions == 1 && board.halfmove_clock < 90 && !is_pv {
+        if entry.depth >= depth && board.state.repetitions <= 1 && board.halfmove_clock < 90 && !is_pv {
             match entry.flag {
                 TTFlag::Exact => return (tt_move, eval),
                 TTFlag::LowerBound => alpha = alpha.max(eval),
@@ -127,6 +139,19 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     let mut best_score = -INF;
     let mut add_proms = false;
 
+    let mut skip_quiets = false;
+
+    // Futility pruning
+    if ply > 0 && depth <= 2 && !in_check && !is_pv && alpha < MATE_CUTOFF {
+        let eval = board.pst_eval();
+        if eval >= beta + REVERSE_FUTILITY_PRUNING_MARGIN * depth as Eval {
+            return (None, eval);
+        }
+        if eval <= alpha - FUTILITY_MARGIN * depth as Eval {
+            skip_quiets = true;
+        }
+    }
+
     // Try to create a beta cutoff by making the tt move first
     if let Some(mv) = tt_move {
         if !board.is_legal_partial(mv) {
@@ -134,13 +159,23 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         } else {
             let unmake_info = board.makemove(mv);
             moved = true;
-            let score = -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1;
+            let score = if board.is_rule_draw() { 0 } else {
+                -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
+            };
             add_proms = board.unmakemove(mv, score, unmake_info, None);
-            alpha = alpha.max(score);
+            if score > alpha {
+                alpha = score;
+            } else {
+                if ply > 0 && depth <= 3 && !in_check && !is_pv && score <= alpha - TT_FUTILITY_MARGIN * depth as Eval && alpha < MATE_CUTOFF {
+                    skip_quiets = true;
+                }
+            }
             if alpha >= beta {
                 state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
-                let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
-                state.tt.insert(tt_entry, ply);
+                if board.state.repetitions <= 1 {
+                    let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
+                    state.tt.insert(tt_entry, ply);
+                }
                 return (tt_move, score)
             }
             if !mv.is_capture() {
@@ -167,12 +202,14 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
+    let mut futility_exit = false;
     let mut i = if tt_move.is_none() { 0 } else { 1 };
     while i < movelist.length {
         if state.stop_search {
             return (None, 0);
         }
         let mv = movelist[i];
+        let mv_prescore = scores[i];
         i += 1;
         if !board.is_legal(mv) {
             continue;
@@ -184,6 +221,11 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             if !moved {
                 -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
             } else {
+                if skip_quiets && mv_prescore <= REGULAR_QUIET_SCORE {
+                    futility_exit = true;
+                    board.unmakemove(mv, 0, unmake_info, None);
+                    break;
+                }
                 let mut reduced_search_depth = depth - 1;
                 if depth >= 3 && tried_quiets_idx >= 3 && !in_check && ply > 1 && !mv.is_queen_promotion() {
                     reduced_search_depth = (depth - 1).saturating_sub(LMR_TABLE[depth.min(63) as usize][i.min(63) as usize]);
@@ -218,7 +260,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         return (None, if in_check { -(MATE - ply as Eval) } else { 0 });
     }
 
-    if board.state.repetitions <= 1 {
+    if board.state.repetitions <= 1 && !futility_exit {
         let tt_flag = 
             if best_score >= beta { TTFlag::LowerBound }
             else if best_score <= original_alpha { TTFlag::UpperBound }
@@ -232,25 +274,44 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
 pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, ply: u8, mut alpha: Eval, beta: Eval) -> Eval {
     state.node_count += 1;
+    if state.stop_search {
+        return 0;
+    }
+    
     if state.node_count % TIMEOUT_MOD == 0 {
         if stop_flag.load(Ordering::Relaxed) {
+            state.stop_search = true;
+            if state.is_main {
+                if let Some(ref fake_stop_flag) = state.fake_stop_flag {
+                    fake_stop_flag.store(true, Ordering::Relaxed);
+                }
+            }
             return 0;
         }
     }
 
+    let is_pv = beta > alpha + 1;
+    let in_check = board.in_check();
     // consider stand pat (not capturing)
     let stand_pat = partial_relative_eval(board, state, alpha, beta);
-    if stand_pat > alpha {
+    if stand_pat > alpha && !in_check {
         alpha = stand_pat;
     }
-    if alpha >= beta || ply >= MAX_PLY {
+    
+    let pawn_endgame = board.state.phase_unbounded == 0;
+    let promoting = board[Piece::WhitePawn] & Board::RANK_7 != 0 || board[Piece::BlackPawn] & Board::RANK_2 != 0;
+    let delta_pruning = !is_pv && !in_check && !pawn_endgame && !promoting;
+    if alpha >= beta || ply >= MAX_PLY || (delta_pruning && stand_pat + Piece::WhiteQueen.abs_regular_value() <= alpha - DELTA_PRUNING_MARGIN) {
         return stand_pat;
     }
 
-    let in_check = board.in_check();
     let mut movelist = board.generate_movelist(!in_check);
     // TODO: try different scoring methods for quiescence search
-    let mut scores = movelist.score(board, &state, None, ply);
+    let mut scores = if in_check {
+        movelist.score(board, &state, None, ply)
+    } else {
+        movelist.quiescense_score(board)
+    };
     movelist.sort(&mut scores);
 
     let mut best_score = stand_pat;
@@ -262,6 +323,14 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
         i += 1;
         if !in_check && mv_prescore < 0 {
             break;
+        }
+        if delta_pruning {
+            let captured_value = if mv.flag() == Flag::ENPASSANT { Piece::WhitePawn.abs_regular_value() } else {
+                board[mv.target_square()].unwrap().abs_regular_value()
+            };
+            if stand_pat + captured_value <= alpha - DELTA_PRUNING_MARGIN {
+                continue;
+            }
         }
         if !board.is_legal(mv) {
             continue;
@@ -292,7 +361,7 @@ pub static LMR_TABLE: Lazy<[[u8; 64]; 64]> = Lazy::new(|| {
         for i in 0..64 {
             if d == 0 || i == 0 { continue; }
             let r = 0.5 + (f64::ln(d as f64) + f64::ln(i as f64)) / 2.25;
-            table[d][i] = (r + 0.5) as u8;
+            table[d][i] = r as u8;
         }
     }
 

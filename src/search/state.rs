@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicBool};
 
 use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
 
@@ -11,7 +11,9 @@ pub struct SearchState {
     pub counter_move: [[Option<Move>; 64]; 64],
     pub max_depth: u8,
     pub node_count: u64,
-    pub stop_search: bool
+    pub stop_search: bool,
+    pub is_main: bool,
+    pub fake_stop_flag: Option<Arc<AtomicBool>>,
 }
 
 impl SearchState {
@@ -29,6 +31,8 @@ impl SearchState {
             max_depth: 0,
             node_count: 0,
             stop_search: false,
+            is_main: true,
+            fake_stop_flag: None
         }
     }
 
@@ -58,7 +62,9 @@ impl SearchState {
             counter_move: self.counter_move.clone(),
             max_depth: self.max_depth,
             node_count: 0,
-            stop_search: false
+            stop_search: false,
+            is_main: false,
+            fake_stop_flag: None
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::{movegen::r#move::MoveScore, repr::colour::Colour};
+use crate::{eval::Eval, movegen::r#move::MoveScore, repr::colour::Colour};
 
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Piece {
@@ -38,6 +38,11 @@ impl Piece {
     pub const MVVLVA_VALUES: [MoveScore; 12] = [
         1, 2, 2, 3, 4, 10,
         1, 2, 2, 3, 4, 10,
+    ];
+
+    pub const ABS_REGULAR_VALUES: [Eval; 12] = [
+        90, 300, 330, 490, 950, 0,
+        90, 300, 330, 490, 950, 0,
     ];
 
     pub fn piece_type(self) -> PieceType {
@@ -83,6 +88,10 @@ impl Piece {
 
     pub fn phase_value(self) -> u8 {
         Piece::PHASE_VALUES[self as usize]
+    }
+
+    pub fn abs_regular_value(self) -> Eval {
+        Piece::ABS_REGULAR_VALUES[self as usize]
     }
 
     pub fn pawn(colour: Colour) -> Self {

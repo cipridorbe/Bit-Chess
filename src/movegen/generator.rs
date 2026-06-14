@@ -86,6 +86,7 @@ impl Board {
     }
 }
 
+#[inline]
 // Does not apply to pawns and castling
 fn generate_piece_movelist(movelist: &mut MoveList, piece: BB, moves: impl Fn(Square) -> BB, avoid: BB, enemy_occupancy: BB, captures_only: bool) {
     for source_square in piece.squares() {
@@ -101,6 +102,7 @@ fn generate_piece_movelist(movelist: &mut MoveList, piece: BB, moves: impl Fn(Sq
     }
 }
 
+#[inline]
 // generates all NON-KING moves that capture the given square
 fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: Square) {
     let colour = board.colour;
@@ -123,6 +125,7 @@ fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: S
     }
 }
 
+#[inline]
 fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, captures_only: bool) {
     let colour = board.colour;
     let pawns = board[Piece::pawn(colour)];
