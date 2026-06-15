@@ -49,7 +49,7 @@ pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth
         let start = Instant::now();
         if let Some(end) = end {
             let remaining = end.saturating_duration_since(start);
-            let predicted = last_iteration_duration.mul_f32(1.0);
+            let predicted = last_iteration_duration;
             if remaining < predicted {
                 break;
             }

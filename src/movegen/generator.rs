@@ -6,6 +6,7 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     let colour = board.colour;
     let checkers = board.state.checkers;
     let enemy_attacks = board.attacks(!colour);
+    let mut pinned_movement = [!BB::new(0); 64];
     // If in check by multiple pieces, only escape is by moving the king
     if checkers.count_ones() >= 2 {
         generate_piece_movelist(&mut movelist,
@@ -13,42 +14,43 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
             single_king_attacks,
             board[colour] | enemy_attacks,
             board[!colour],
-            captures_only
+            captures_only, &pinned_movement
         );
         return movelist;
     }
-
-    // let mut pinned_movement = [!BB::new(0); 64];
-    // let king = board[Piece::king(colour)];
-    // let mut pinners = BB::new(0);
-    // let rook_attacks = single_rook_attacks(king.lsb(), board.occupied());
-    // let xray_rook_attacks = single_rook_attacks(king.lsb(), board.occupied() & !(rook_attacks & board[colour]));
-    // let bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied());
-    // let xray_bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied() & !(bishop_attacks & board[colour]));
-    // pinners |= xray_rook_attacks & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]);
-    // pinners |= xray_bishop_attacks & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]);
-    // for pinner in pinners.squares() {
-    //     let segment = SEGMENT[pinner as usize][king.lsb() as usize];
-    //     let pinned = segment & board[colour];
-    //     pinned_movement[pinned.lsb() as usize] = segment;
-    // }
+    let king = board[Piece::king(colour)];
+    let mut pinners = BB::new(0);
+    let rook_attacks = single_rook_attacks(king.lsb(), board.occupied());
+    let xray_rook_attacks = single_rook_attacks(king.lsb(), board.occupied() & !(rook_attacks & board[colour]));
+    let bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied());
+    let xray_bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied() & !(bishop_attacks & board[colour]));
+    pinners |= xray_rook_attacks & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]);
+    pinners |= xray_bishop_attacks & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]);
+    for pinner in pinners.squares() {
+        let segment = SEGMENT[pinner as usize][king.lsb() as usize];
+        let pinned = segment & board[colour];
+        pinned_movement[pinned.lsb() as usize] = segment;
+    }
 
     let mut check_segment = !BB::new(0);
     if checkers.count_ones() == 1 {
         let checker = checkers.lsb();
         if board[checker].unwrap().piece_type() == PieceType::Leaper {
-            generate_attackers_movelist(&mut movelist, board, checker);
+            generate_attackers_movelist(&mut movelist, board, checker, &pinned_movement);
             generate_piece_movelist(&mut movelist,
                 board[Piece::king(colour)],
                 single_king_attacks,
                 board[colour] | enemy_attacks,
                 board[!colour],
-                captures_only
+                captures_only, &pinned_movement
             );
             if let Some(enpassant) = board.enpassant {
                 if board[checker].unwrap() == Piece::pawn(!colour) {
                     for pawn in BB::squares(pawn_attacks(enpassant.bb(), !colour) & board[Piece::pawn(colour)]) {
-                        movelist.add(Move::new(Flag::ENPASSANT, enpassant, pawn));
+                        let mv = Move::new(Flag::ENPASSANT, enpassant, pawn);
+                        if board.is_legal(mv) {
+                            movelist.add(Move::new(Flag::ENPASSANT, enpassant, pawn));
+                        }
                     }
                 }
             }
@@ -57,41 +59,41 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
         check_segment = SEGMENT[checker as usize][board[Piece::king(colour)].lsb() as usize];
     }
     generate_castling_movelist(&mut movelist, board, captures_only);
-    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only);
+    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only, &pinned_movement);
     generate_piece_movelist(&mut movelist,
         board[Piece::knight(colour)],
         single_knight_attacks,
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_movement
     );
     generate_piece_movelist(&mut movelist,
         board[Piece::bishop(colour)],
         |square | {single_bishop_attacks(square, board.occupied())},
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_movement
     );
     generate_piece_movelist(&mut movelist,
         board[Piece::queen(colour)],
         |square | {single_queen_attacks(square, board.occupied())},
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_movement
     );
     generate_piece_movelist(&mut movelist,
         board[Piece::rook(colour)],
         |square | {single_rook_attacks(square, board.occupied())},
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_movement
     );
     generate_piece_movelist(&mut movelist,
         board[Piece::king(colour)],
         single_king_attacks,
         board[colour] | enemy_attacks,
         board[!colour],
-        captures_only
+        captures_only, &pinned_movement
     );
     movelist
 }
@@ -181,14 +183,12 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, cap
     }
 
     if let Some(enp_square) = board.enpassant {
-        let pawn_square = if colour == Colour::White {
-            Square::from_u8(enp_square as u8 - 8)
-        } else {
-            Square::from_u8(enp_square as u8 + 8)
-        };
         if enp_square.bb() & !avoid != 0 {
             for pawn in BB::squares(pawn_attacks(enp_square.bb(), !colour) & pawns) {
-                movelist.add(Move::new(Flag::ENPASSANT, enp_square, pawn));
+                let mv = Move::new(Flag::ENPASSANT, enp_square, pawn);
+                if board.is_legal(mv) {
+                    movelist.add(Move::new(Flag::ENPASSANT, enp_square, pawn));
+                }
             }
         }
     }
