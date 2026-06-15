@@ -5,12 +5,12 @@ use crate::{eval::{Eval, status::FileStatus}, movegen::attacks::pawn_attacks, re
 const FRIEND_BONUS: Eval = 10;
 const ISOLATED_BONUS: Eval = -15;
 const DOUBLED_BONUS: Eval = -10;
-const RANK_BONUS: [Eval; 6] = [10, 20, 35, 60, 100, 150];
-const PROTECTED_PASSED_PAWN_BONUS: Eval = 25;
+const RANK_BONUS: [Eval; 6] = [10, 20, 40, 75, 120, 175];
+const PROTECTED_PASSED_PAWN_BONUS: [Eval; 6] = [0, 5, 15, 25, 40, 60]; 
 const BACKWARD_PAWN_BONUS: Eval = -20;
 const PAWN_ISLAND_BONUS: Eval = -10;
 
-const MISSING_GUARD_BONUS: Eval = -15;
+const MISSING_GUARD_BONUS: Eval = -20;
 const KING_DISTANCE_BONUS: [Eval; 8] = [0, 0, 50, 40, 30, 20, 10, 0];
 
 #[inline]
@@ -125,13 +125,19 @@ pub fn pawn_bonus(board: &Board, search_state: &mut SearchState) -> PawnTableEnt
     bonus += (white_doubled.count_ones() as Eval - black_doubled.count_ones() as Eval) * DOUBLED_BONUS;
     bonus += (white_islands as Eval - black_islands as Eval) * PAWN_ISLAND_BONUS;
     bonus += (white_backward.count_ones() as Eval - black_backward.count_ones() as Eval) * BACKWARD_PAWN_BONUS;
-    bonus += (white_protected_passed.count_ones() as Eval - black_protected_passed.count_ones() as Eval) * PROTECTED_PASSED_PAWN_BONUS;
     eg_bonus += ((white_passed & RANK2).count_ones() as Eval - (black_passed & RANK7).count_ones() as Eval) * RANK_BONUS[0];
     eg_bonus += ((white_passed & RANK3).count_ones() as Eval - (black_passed & RANK6).count_ones() as Eval) * RANK_BONUS[1];
     eg_bonus += ((white_passed & RANK4).count_ones() as Eval - (black_passed & RANK5).count_ones() as Eval) * RANK_BONUS[2];
     eg_bonus += ((white_passed & RANK5).count_ones() as Eval - (black_passed & RANK4).count_ones() as Eval) * RANK_BONUS[3];
     eg_bonus += ((white_passed & RANK6).count_ones() as Eval - (black_passed & RANK3).count_ones() as Eval) * RANK_BONUS[4];
     eg_bonus += ((white_passed & RANK7).count_ones() as Eval - (black_passed & RANK2).count_ones() as Eval) * RANK_BONUS[5];
+
+    eg_bonus += ((white_protected_passed & RANK2).count_ones() as Eval - (black_protected_passed & RANK7).count_ones() as Eval) * RANK_BONUS[0];
+    eg_bonus += ((white_protected_passed & RANK3).count_ones() as Eval - (black_protected_passed & RANK6).count_ones() as Eval) * RANK_BONUS[1];
+    eg_bonus += ((white_protected_passed & RANK4).count_ones() as Eval - (black_protected_passed & RANK5).count_ones() as Eval) * RANK_BONUS[2];
+    eg_bonus += ((white_protected_passed & RANK5).count_ones() as Eval - (black_protected_passed & RANK4).count_ones() as Eval) * RANK_BONUS[3];
+    eg_bonus += ((white_protected_passed & RANK6).count_ones() as Eval - (black_protected_passed & RANK3).count_ones() as Eval) * RANK_BONUS[4];
+    eg_bonus += ((white_protected_passed & RANK7).count_ones() as Eval - (black_protected_passed & RANK2).count_ones() as Eval) * RANK_BONUS[5];
 
     let (mg_king, eg_king) = king_bonus(board[Piece::WhiteKing], board[Piece::WhitePawn], files[0], board[Piece::BlackKing], board[Piece::BlackPawn], files[1]);
     mg_bonus += mg_king;

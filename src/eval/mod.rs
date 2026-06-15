@@ -10,8 +10,8 @@ pub const INF: Eval = 31000;
 pub const MATE: Eval = INF - 1;
 pub const MATE_CUTOFF: Eval = MATE - MAX_PLY as Eval * 2;
 
-pub const EVAL_BONUS_DELTA_OUTER: Eval = 105;
-pub const EVAL_BONUS_DELTA_INNER: Eval = 55;
+pub const EVAL_BONUS_DELTA_OUTER: Eval = 115;
+pub const EVAL_BONUS_DELTA_INNER: Eval = 60;
 
 const BATTERY_BONUS: Eval = 25;
 const OUTPOST_BONUS: Eval = 40;

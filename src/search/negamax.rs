@@ -6,6 +6,8 @@ use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen
 
 pub const TIMEOUT_MOD: u64 = 1 << 13;
 
+const ASPIRATION_WINDOW_DELTAS: [Eval; 2] = [25, 40];
+
 const FUTILITY_MARGIN: Eval = 150;
 const TT_FUTILITY_MARGIN: Eval = 100;
 const REVERSE_FUTILITY_PRUNING_MARGIN: Eval = 215;
@@ -53,7 +55,39 @@ pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth
             }
         }
         state.max_depth = depth + depth / 2;
-        let (mv, current_score) = negamax(stop_flag, board, state, depth, 0, -INF, INF, false);
+        let (mv, current_score) = if depth <= 5 { 
+            negamax(stop_flag, board, state, depth, 0, -INF, INF, false)
+        } else {
+            let mut a = 0;
+            let mut b = 0;
+            let (mut _mv, mut _current_score) = (None, 0);
+            loop {
+                let alpha = if a < ASPIRATION_WINDOW_DELTAS.len() {
+                    score - ASPIRATION_WINDOW_DELTAS[a]
+                } else {
+                    -INF
+                };
+                let beta = if b < ASPIRATION_WINDOW_DELTAS.len() {
+                    score + ASPIRATION_WINDOW_DELTAS[b]
+                } else {
+                    INF
+                };
+                (_mv, _current_score) = negamax(stop_flag, board, state, depth, 0, alpha, beta, false);
+                if _current_score <= alpha && alpha > -INF {
+                    if _current_score <= -MATE_CUTOFF { a = ASPIRATION_WINDOW_DELTAS.len(); }
+                    else { a += 1; }
+                    continue;
+                }
+                if _current_score >= beta && beta < INF {
+                    if _current_score >= MATE_CUTOFF { b = ASPIRATION_WINDOW_DELTAS.len(); }
+                    else { b += 1; }
+                    continue;
+                }
+
+                break;
+            }
+            (_mv, _current_score)
+        };
         if stop_flag.load(Ordering::Relaxed) {
             break;
         }
@@ -61,6 +95,9 @@ pub fn iterative_deepening(board: &mut Board, state: &mut SearchState, max_depth
         score = current_score;
         reached_depth = depth;
         last_iteration_duration = Instant::now() - start;
+        if current_score.abs() >= MATE_CUTOFF {
+            break;
+        }
     }
     (best_move, score, reached_depth, state.node_count)
 }
