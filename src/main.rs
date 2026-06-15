@@ -13,4 +13,10 @@ nodes     : 2191631818 (22472 knps)
 time      : 97.53s
 avg depth : 18.8
 925961540 nodes   3.214s   288.1 Mnps
+
+    RAY PINNER DETECTION
+nodes     : 1955607707 (20363 knps)
+time      : 96.04s
+avg depth : 18.8
+925961540 nodes   3.567s   259.6 Mnps
 */

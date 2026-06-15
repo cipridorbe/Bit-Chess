@@ -168,6 +168,36 @@ pub static SEGMENT_DIAGONAL: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
     table
 });
 
+pub static RAY: Lazy<[[BB; 64]; 64]> = Lazy::new(|| {
+    let mut table = [[BB::new(0); 64]; 64];
+    for sq in Square::all() {
+        for (dr, df) in [(0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)] {
+            let (r, f) = sq.rank_file();
+            let mut r = r as i8;
+            let mut f = f as i8;
+            while r >= 0 && r < 8 && f >= 0 && f < 8 {
+                r += dr;
+                f += df;
+            }
+            r -= dr;
+            f -= df;
+            let end = Square::from_rank_file(r as u8, f as u8);
+            let ray = SEGMENT[end as usize][sq as usize];
+
+            let (r, f) = sq.rank_file();
+            let mut r = r as i8 + dr;
+            let mut f = f as i8 + df;
+            while r >= 0 && r < 8 && f >= 0 && f < 8 {
+                let sq2 = Square::from_rank_file(r as u8, f as u8);
+                table[sq as usize][sq2 as usize] = ray;
+                r += dr;
+                f += df;
+            }
+        }
+    }
+    table
+});
+
 pub static KING_DISTANCE: Lazy<[[u8; 64]; 64]> = Lazy::new(|| {
     let mut table = [[0; 64]; 64];
     for sq1 in Square::all() {
