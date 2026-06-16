@@ -1,6 +1,6 @@
 #[cfg(not(target_feature = "bmi2"))]
 use crate::movegen::tables::{BISHOP_ATTACKS, BISHOP_BITS, BISHOP_MAGIC, BISHOP_MASK, ROOK_ATTACKS, ROOK_BITS, ROOK_MAGIC, ROOK_MASK};
-use crate::{movegen::tables::{KING_ATTACKS, KNIGHT_ATTACKS}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::Square}};
+use crate::{movegen::tables::{KING_ATTACKS, KNIGHT_ATTACKS}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::{SEGMENT, Square}}};
 
 /// Bitboard of pawn attacks of the given colour
 pub fn pawn_attacks(pawns: BB, colour: Colour) -> BB {
@@ -151,5 +151,21 @@ impl Board {
         out |= bishop_attacks & self[Piece::bishop(other)];
         out |= (rook_attacks | bishop_attacks) & self[Piece::queen(other)];
         out
+    }
+
+    pub fn pinned_and_pinners(&self) -> (BB, BB) {
+        let colour = self.colour;
+        let king = self[Piece::king(colour)].lsb();
+        let rook_attacks = single_rook_attacks(king, self.occupied());
+        let xray_rook = single_rook_attacks(king, self.occupied() & !(rook_attacks & self[colour]));
+        let bishop_attacks = single_bishop_attacks(king, self.occupied());
+        let xray_bishop = single_bishop_attacks(king, self.occupied() & !(bishop_attacks & self[colour]));
+        let mut pinners = xray_rook & (self[Piece::rook(!colour)] | self[Piece::queen(!colour)]);
+        pinners |= xray_bishop & (self[Piece::bishop(!colour)] | self[Piece::queen(!colour)]);
+        let mut pinned = BB::new(0);
+        for pinner in pinners.squares() {
+            pinned |= SEGMENT[pinner as usize][king as usize] & self[colour];
+        }
+        (pinned, pinners)
     }
 }

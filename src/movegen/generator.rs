@@ -1,22 +1,32 @@
-use crate::{movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_king_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, r#move::{Flag::{self, CAPTURE}, Move, MoveList}}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::{SEGMENT, Square}}};
+use crate::{movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_king_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, r#move::{Flag::{self, CAPTURE}, Move, MoveList}}, repr::{bitboard::BB, board::Board, colour::Colour, piece::{Piece, PieceType}, square::{RAY, SEGMENT, Square}}};
+
+const NO_PINS: [BB; 64] = [BB::new(!0); 64];
 
 /// Creates list of pseudo-legal moves.
-fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
+fn generate_movelist(board: &Board, captures_only: bool, mut legal: bool) -> MoveList {
     let mut movelist = MoveList::new();
     let colour = board.colour;
     let checkers = board.state.checkers;
     let enemy_attacks = board.attacks(!colour);
     let king = board[Piece::king(colour)].lsb();
-    movelist.pinned = board.pinned();
+    let (pinned, pinners) = board.pinned_and_pinners();
+    movelist.pinned = pinned;
+    if pinned == 0 { legal = false; }
+    let mut pinned_moves = NO_PINS;
+    if legal {
+        for pin in pinned.squares() {
+            pinned_moves[pin as usize] = RAY[king as usize][pin as usize];
+        } 
+    }
 
     // If in check by multiple pieces, only escape is by moving the king
     if checkers.count_ones() >= 2 {
-        generate_piece_movelist(&mut movelist,
+        generate_piece_movelist::<false>(&mut movelist,
             board[Piece::king(colour)],
             single_king_attacks,
             board[colour] | enemy_attacks,
             board[!colour],
-            captures_only
+            captures_only, &NO_PINS, false
         );
         return movelist;
     }
@@ -25,18 +35,20 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
     if checkers.count_ones() == 1 {
         let checker = checkers.lsb();
         if board[checker].unwrap().piece_type() == PieceType::Leaper {
-            generate_attackers_movelist(&mut movelist, board, checker);
-            generate_piece_movelist(&mut movelist,
+            generate_attackers_movelist(&mut movelist, board, checker, &pinned_moves, legal);
+            generate_piece_movelist::<false>(&mut movelist,
                 board[Piece::king(colour)],
                 single_king_attacks,
                 board[colour] | enemy_attacks,
                 board[!colour],
-                captures_only
+                captures_only, &pinned_moves, legal
             );
             if let Some(enpassant) = board.enpassant {
                 if board[checker].unwrap() == Piece::pawn(!colour) {
                     for pawn in BB::squares(pawn_attacks(enpassant.bb(), !colour) & board[Piece::pawn(colour)]) {
-                        movelist.add(Move::new(Flag::ENPASSANT, enpassant, pawn));
+                        let mv = Move::new(Flag::ENPASSANT, enpassant, pawn);
+                        if legal && !enpassant_legal(board, mv, &pinned_moves) { continue; }
+                        movelist.add(mv);
                     }
                 }
             }
@@ -45,48 +57,48 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
         check_segment = SEGMENT[checker as usize][board[Piece::king(colour)].lsb() as usize];
     }
     generate_castling_movelist(&mut movelist, board, captures_only);
-    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only);
-    generate_piece_movelist(&mut movelist,
+    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only, &pinned_moves, legal);
+    generate_piece_movelist::<true>(&mut movelist,
         board[Piece::knight(colour)],
         single_knight_attacks,
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_moves, legal
     );
-    generate_piece_movelist(&mut movelist,
+    generate_piece_movelist::<false>(&mut movelist,
         board[Piece::bishop(colour)],
         |square| { single_bishop_attacks(square, board.occupied()) },
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_moves, legal
     );
-    generate_piece_movelist(&mut movelist,
+    generate_piece_movelist::<false>(&mut movelist,
         board[Piece::queen(colour)],
         |square| { single_queen_attacks(square, board.occupied()) },
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_moves, legal
     );
-    generate_piece_movelist(&mut movelist,
+    generate_piece_movelist::<false>(&mut movelist,
         board[Piece::rook(colour)],
         |square| { single_rook_attacks(square, board.occupied()) },
         !check_segment | board[colour],
         board[!colour],
-        captures_only
+        captures_only, &pinned_moves, legal
     );
-    generate_piece_movelist(&mut movelist,
+    generate_piece_movelist::<false>(&mut movelist,
         board[Piece::king(colour)],
         single_king_attacks,
         board[colour] | enemy_attacks,
         board[!colour],
-        captures_only
+        captures_only, &pinned_moves, legal
     );
     movelist
 }
 
 impl Board {
     pub fn generate_movelist(&self, captures_only: bool) -> MoveList {
-        generate_movelist(self, captures_only)
+        generate_movelist(self, captures_only, true)
     }
 }
 
@@ -249,16 +261,6 @@ fn enpassant_legal(board: &Board, mv: Move, pinned_moves: &[BB; 64]) -> bool {
     let new_occupied = (board.occupied() & !mv.source_square().bb() & !captured_square.bb()) | mv.target_square();
     if pinned_moves[mv.source_square() as usize] & mv.target_square() == 0 {
         return false;
-    }
-    if SEGMENT[king.lsb() as usize][mv.source_square() as usize] != 0 && board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) != 0 {
-        let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
-            return false;
-        }
-        let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
-            return false;
-        }
     }
     if SEGMENT[king.lsb() as usize][captured_square as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) == 0 {
         return true;

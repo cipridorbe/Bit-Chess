@@ -444,24 +444,6 @@ impl Board {
         return true;
         is_legal_partial(self, mv)
     }
-
-    pub fn pinned(&self) -> BB {
-        use crate::movegen::attacks::{single_bishop_attacks, single_rook_attacks};
-        use crate::repr::square::SEGMENT;
-        let colour = self.colour;
-        let king = self[Piece::king(colour)].lsb();
-        let rook_attacks = single_rook_attacks(king, self.occupied());
-        let xray_rook = single_rook_attacks(king, self.occupied() & !(rook_attacks & self[colour]));
-        let bishop_attacks = single_bishop_attacks(king, self.occupied());
-        let xray_bishop = single_bishop_attacks(king, self.occupied() & !(bishop_attacks & self[colour]));
-        let mut pinners = xray_rook & (self[Piece::rook(!colour)] | self[Piece::queen(!colour)]);
-        pinners |= xray_bishop & (self[Piece::bishop(!colour)] | self[Piece::queen(!colour)]);
-        let mut pinned = BB::new(0);
-        for pinner in pinners.squares() {
-            pinned |= SEGMENT[pinner as usize][king as usize] & self[colour];
-        }
-        pinned
-    }
 }
 
 /// Information stored when making a move to later unmake it
