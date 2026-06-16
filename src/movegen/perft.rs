@@ -7,7 +7,7 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     let mut i = 0;
     while i < movelist.length {
         let mv = movelist[i];
-        // if board.is_legal(mv) {
+        if board.is_legal(mv, movelist.pinned) {
             if depth == 1 {
                 out += 1;
                 if mv.is_queen_promotion() { out += 2; }
@@ -16,7 +16,7 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
                 out += perft(board, depth - 1);
                 board.unmakemove(mv, 0, unmake, Some(&mut movelist));
             }
-        // }
+        }
         i += 1;
     }
     out
@@ -142,7 +142,7 @@ mod bench {
             ("Extra 16", "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1"),
             ("Extra 23", "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1"),
         ];
-        const DEPTH: u32 = 5;
+        const DEPTH: u32 = 6;
 
         let mut total_nodes = 0u64;
         let mut total_secs = 0f64;

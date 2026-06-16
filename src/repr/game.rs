@@ -99,7 +99,7 @@ impl Game {
         let mut i = 0;
         while i < movelist.length {
             let mv = movelist[i];
-            if self.board.is_legal(mv) {
+            if self.board.is_legal(mv, movelist.pinned) {
                 return None;
             }
             // have to make and unmake to prevent queen promotion stalemates

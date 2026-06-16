@@ -248,7 +248,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         let mv = movelist[i];
         let mv_prescore = scores[i];
         i += 1;
-        if !board.is_legal(mv) {
+        if !board.is_legal(mv, movelist.pinned) {
             continue;
         }
         let unmake_info = board.makemove(mv);
@@ -369,7 +369,7 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
                 continue;
             }
         }
-        if !board.is_legal(mv) {
+        if !board.is_legal(mv, movelist.pinned) {
             continue;
         }
         let unmake_info = board.makemove(mv);

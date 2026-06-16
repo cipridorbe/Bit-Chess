@@ -1,4 +1,4 @@
-use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}, test_assert};
+use crate::{eval::{Eval, pst::{PIECE_VALUE_EG, PIECE_VALUE_MG, PST_EG, PST_MG}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_rook_attacks}, r#move::{Flag, Move, MoveList}}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{RAY, SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}, test_assert};
 
 fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     test_assert!(board.attacks(board.colour) & board[Piece::king(!board.colour)] == 0);
@@ -352,7 +352,7 @@ fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
     board.move_history.pop();
 }
 
-fn is_legal(board: &Board, mv: Move) -> bool {
+fn is_legal(board: &Board, mv: Move, pinned: BB) -> bool {
     let colour = board.colour;
     let piece = board[mv.source_square()].unwrap();
     if piece == Piece::WhiteKing || piece == Piece::BlackKing {
@@ -360,16 +360,8 @@ fn is_legal(board: &Board, mv: Move) -> bool {
     }
     let king = board[Piece::king(colour)];
     if mv.flag() != Flag::ENPASSANT {
-        if SEGMENT[king.lsb() as usize][mv.source_square() as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & mv.source_square().bb() == 0 {
-            return true;
-        }
-        let new_occupied = board.occupied() & !mv.source_square().bb() | mv.target_square();
-        let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
-            return false;
-        }
-        let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+        if pinned != 0 && mv.source_square().bb() & pinned != 0
+            && RAY[king.lsb() as usize][mv.source_square() as usize] & mv.target_square() == 0 {
             return false;
         }
         return true;
@@ -381,7 +373,7 @@ fn is_legal(board: &Board, mv: Move) -> bool {
         let new_occupied = (board.occupied() & !mv.source_square().bb() & !captured_square.bb()) | mv.target_square();
         if SEGMENT[king.lsb() as usize][mv.source_square() as usize] != 0 && board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) != 0 {
             let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-            if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
+            if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
                 return false;
             }
             let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
@@ -393,7 +385,7 @@ fn is_legal(board: &Board, mv: Move) -> bool {
             return true;
         }
         let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0{
+        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
             return false;
         }
         let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
@@ -444,13 +436,31 @@ impl Board {
         null_unmakemove(self, null_unmake_info);
     }
 
-    pub fn is_legal(&self, mv: Move) -> bool {
-        is_legal(self, mv)
+    pub fn is_legal(&self, mv: Move, pinned: BB) -> bool {
+        is_legal(self, mv, pinned)
     }
 
     pub fn is_legal_partial(&self, mv: Move) -> bool {
         return true;
         is_legal_partial(self, mv)
+    }
+
+    pub fn pinned(&self) -> BB {
+        use crate::movegen::attacks::{single_bishop_attacks, single_rook_attacks};
+        use crate::repr::square::SEGMENT;
+        let colour = self.colour;
+        let king = self[Piece::king(colour)].lsb();
+        let rook_attacks = single_rook_attacks(king, self.occupied());
+        let xray_rook = single_rook_attacks(king, self.occupied() & !(rook_attacks & self[colour]));
+        let bishop_attacks = single_bishop_attacks(king, self.occupied());
+        let xray_bishop = single_bishop_attacks(king, self.occupied() & !(bishop_attacks & self[colour]));
+        let mut pinners = xray_rook & (self[Piece::rook(!colour)] | self[Piece::queen(!colour)]);
+        pinners |= xray_bishop & (self[Piece::bishop(!colour)] | self[Piece::queen(!colour)]);
+        let mut pinned = BB::new(0);
+        for pinner in pinners.squares() {
+            pinned |= SEGMENT[pinner as usize][king as usize] & self[colour];
+        }
+        pinned
     }
 }
 

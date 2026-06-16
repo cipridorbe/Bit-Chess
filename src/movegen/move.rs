@@ -24,7 +24,7 @@
 
 use std::{num::NonZeroU16, ops::{Index, IndexMut}};
 
-use crate::{eval::Eval, repr::{board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::{see_mvvlva, see_sign}, state::SearchState}, test_assert};
+use crate::{eval::Eval, repr::{bitboard::BB, board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::{see_mvvlva, see_sign}, state::SearchState}, test_assert};
 
 /// Maximum number of moves that can be made from any position
 pub const MAX_MOVES: usize = 218;
@@ -220,6 +220,7 @@ pub struct MoveList {
     moves: [Move; 218],
     pub length: usize,
     captures: usize,
+    pub pinned: BB,
 }
 
 impl MoveList {
@@ -228,7 +229,8 @@ impl MoveList {
         MoveList {
             moves: [Move::new_invalid(); 218],
             length: 0,
-            captures: 0
+            captures: 0,
+            pinned: BB::new(0),
         }
     }
 
