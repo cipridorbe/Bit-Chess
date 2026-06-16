@@ -11,6 +11,7 @@ fn generate_movelist(board: &Board, captures_only: bool, mut legal: bool) -> Mov
     let king = board[Piece::king(colour)].lsb();
     let (pinned, pinners) = board.pinned_and_pinners();
     movelist.pinned = pinned;
+    let original_legal = legal;
     if pinned == 0 { legal = false; }
     let mut pinned_moves = NO_PINS;
     if legal {
@@ -47,7 +48,7 @@ fn generate_movelist(board: &Board, captures_only: bool, mut legal: bool) -> Mov
                 if board[checker].unwrap() == Piece::pawn(!colour) {
                     for pawn in BB::squares(pawn_attacks(enpassant.bb(), !colour) & board[Piece::pawn(colour)]) {
                         let mv = Move::new(Flag::ENPASSANT, enpassant, pawn);
-                        if legal && !enpassant_legal(board, mv, &pinned_moves) { continue; }
+                        if original_legal && !enpassant_legal(board, mv, &pinned_moves) { continue; }
                         movelist.add(mv);
                     }
                 }
@@ -57,7 +58,7 @@ fn generate_movelist(board: &Board, captures_only: bool, mut legal: bool) -> Mov
         check_segment = SEGMENT[checker as usize][board[Piece::king(colour)].lsb() as usize];
     }
     generate_castling_movelist(&mut movelist, board, captures_only);
-    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only, &pinned_moves, legal);
+    generate_pawn_movelist(&mut movelist, board, !check_segment | board[colour], captures_only, &pinned_moves, legal, original_legal);
     generate_piece_movelist::<true>(&mut movelist,
         board[Piece::knight(colour)],
         single_knight_attacks,
@@ -149,7 +150,7 @@ fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: S
 }
 
 #[inline]
-fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, captures_only: bool, pinned_moves: &[BB; 64], legal: bool) {
+fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, captures_only: bool, pinned_moves: &[BB; 64], legal: bool, original_legal: bool) {
     let colour = board.colour;
     let pawns = board[Piece::pawn(colour)];
     match colour {
@@ -182,7 +183,9 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, cap
     if let Some(enp_square) = board.enpassant {
         if enp_square.bb() & !avoid != 0 {
             for pawn in BB::squares(pawn_attacks(enp_square.bb(), !colour) & pawns) {
-                movelist.add(Move::new(Flag::ENPASSANT, enp_square, pawn));
+                let mv = Move::new(Flag::ENPASSANT, enp_square, pawn);
+                if original_legal && !enpassant_legal(board, mv, pinned_moves) { continue; }
+                movelist.add(mv);
             }
         }
     }
@@ -196,6 +199,7 @@ fn add_pawn_moves(movelist: &mut MoveList, targets: BB, offset: i8, flag: Flag, 
         if target_square.rank() == 7 || target_square.rank() == 0 {
             movelist.add(mv.into_queen_prom());
             movelist.add(mv.into_knight_prom());
+            movelist.queen_proms += 1;
         } else {
             movelist.add(mv);
         }

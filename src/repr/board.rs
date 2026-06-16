@@ -132,7 +132,9 @@ impl Board {
                 eg_eval: 0,
                 repetitions: 0,
                 phase_unbounded: 0,
-            } 
+                xray_attacks: [BB::new(0); 2],
+                pinners: [BB::new(0); 2],
+            }
         }
     }
 
@@ -236,6 +238,11 @@ impl Board {
             out.state.attacks[colour as usize][piece_type as usize] = out.calculate_attacks(colour, piece_type)
         }
         out.state.checkers = out.calculate_checkers();
+        for &colour in &[Colour::White, Colour::Black] {
+            let (xray, pinners_bb) = out.compute_raw_xray_and_pinners(colour);
+            out.state.xray_attacks[colour as usize] = xray;
+            out.state.pinners[!colour as usize] = pinners_bb;
+        }
         if (out.attacks(out.colour) & out[Piece::king(!out.colour)]) != 0 {
             panic!("Side not to move cannot be in check");
         }
@@ -302,4 +309,6 @@ pub struct BoardState {
     pub repetitions: u8,
     /// The phase of the game, between 0 and 24
     pub phase_unbounded: u8,
+    pub xray_attacks: [BB; 2],
+    pub pinners: [BB; 2],
 }

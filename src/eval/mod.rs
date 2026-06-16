@@ -175,7 +175,7 @@ fn slider_mobility(board: &Board) -> (Eval, Eval) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::cmp::Reverse;
     use crate::{eval::bonus_eval, movegen::r#move::Move, repr::board::Board, search::state::SearchState};
 
@@ -221,12 +221,7 @@ mod tests {
         eprintln!();
     }
 
-    /// Measures the distribution of |bonus_eval()| across all reachable positions
-    /// at BONUS_DIST_DEPTH plies from each perft start position.
-    /// Run with: cargo test --release test_bonus_distribution -- --nocapture
-    #[test]
-    fn test_bonus_distribution() {
-        let positions = [
+    pub(crate) const TEST_POSITIONS: &[(&str, &str)] = &[
             ("Start",    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
             ("Kiwipete", "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"),
             ("Pos3",     "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"),
@@ -320,8 +315,11 @@ mod tests {
             ("G21p81ph4", "5k2/5R2/1p2P2p/p3p3/P3p2P/4P1K1/4r1P1/8 b - - 2 41"),  // phase~4
             ("G17p54ph2", "8/2p2Npp/8/1p1kP3/3n4/6P1/1P3PKP/8 w - - 2 28"),  // phase~2
             ("G27p69ph2", "4k3/p2n4/p2P4/N1p2pp1/5P2/P5K1/1P4P1/8 b - - 0 35"),  // phase~2
-        ];
+    ];
 
+    #[test]
+    fn test_bonus_distribution() {
+        let positions = TEST_POSITIONS;
         let mut state = SearchState::new(16, 2, 18);
         let mut global_bonus: Vec<i32> = Vec::new();
         let mut global_pawn:  Vec<i32> = Vec::new();
@@ -330,7 +328,7 @@ mod tests {
         // (name, full_abs_sorted, pawn_abs_sorted, rest_abs_sorted, phase_avg, phase_root)
         let mut per_pos: Vec<(&str, Vec<i32>, Vec<i32>, Vec<i32>, i32, i32)> = Vec::new();
 
-        for (name, fen) in &positions {
+        for (name, fen) in positions {
             let mut board = Board::from_fen(fen);
             let phase_root = board.state.phase_unbounded as i32;
             let mut bonus_samples: Vec<i32> = Vec::new();

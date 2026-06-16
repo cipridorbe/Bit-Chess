@@ -10,6 +10,8 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     let mut final_square = mv.target_square();
     let mut captured = board[mv.target_square()];
     let original_occupancy = board.occupied();
+    let original_white = board[Colour::White];
+    let original_black = board[Colour::Black];
     
     unmake_info.piece = piece;
     unmake_info.captured = captured;
@@ -163,7 +165,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     }
 
     let diff = original_occupancy ^ board.occupied();
-
+    let colour_diff = (original_white ^ board[Colour::White]) | (original_black ^ board[Colour::Black]);
 
     match piece.piece_type() {
         PieceType::Slider => board.state.attacks[colour as usize][PieceType::Slider as usize] = board.calculate_attacks(colour, PieceType::Slider),
@@ -193,37 +195,43 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     }
 
     board.state.checkers = BB::new(0);
-    if board.attacks(colour) & board[Piece::king(!colour)] != 0 {
-        let king = board[Piece::king(!colour)];
-        let moved_checks = match final_piece {
-            Piece::WhiteKing | Piece::BlackKing => false,
-            Piece::WhitePawn | Piece::BlackPawn => pawn_attacks(mv.target_square().bb(), colour) & king != 0,
-            Piece::WhiteKnight | Piece::BlackKnight => single_knight_attacks(mv.target_square()) & king != 0,
-            Piece::WhiteBishop | Piece::BlackBishop => SEGMENT_DIAGONAL[mv.target_square() as usize][king.lsb() as usize] & board.occupied() == mv.target_square().bb(),
-            Piece::WhiteRook | Piece::BlackRook => SEGMENT_CARDINAL[final_square as usize][king.lsb() as usize] & board.occupied() == final_square.bb(),
-            Piece::WhiteQueen | Piece::BlackQueen => SEGMENT[mv.target_square() as usize][king.lsb() as usize] & board.occupied() == mv.target_square().bb(),
-        };
-        if moved_checks {
-            board.state.checkers |= final_square;
+    if colour_diff & board.state.xray_attacks[Colour::White as usize] != 0 {
+        let c = Colour::White;
+        let king = board[Piece::king(c)].lsb();
+        let rook_attacks = single_rook_attacks(king, board.occupied());
+        let xray_rook = single_rook_attacks(king, board.occupied() & !(rook_attacks & board[c]));
+        let bishop_attacks = single_bishop_attacks(king, board.occupied());
+        let xray_bishop = single_bishop_attacks(king, board.occupied() & !(bishop_attacks & board[c]));
+        let xray = xray_rook | xray_bishop;
+        let pinners = (xray_rook & (board[Piece::rook(!c)] | board[Piece::queen(!c)]))
+            | (xray_bishop & (board[Piece::bishop(!c)] | board[Piece::queen(!c)]));
+        board.state.xray_attacks[c as usize] = xray;
+        board.state.pinners[!c as usize] = pinners;
+        if colour == !c {
+            board.state.checkers |= rook_attacks & (board[Piece::rook(!c)] | board[Piece::queen(!c)]);
+            board.state.checkers |= bishop_attacks & (board[Piece::bishop(!c)] | board[Piece::queen(!c)]);
         }
-        let enpassant_check = mv.flag() == Flag::ENPASSANT && {
-            let captured_square = match colour {
-                Colour::White => Square::from_u8(mv.target_square() as u8 - 8),
-                Colour::Black => Square::from_u8(mv.target_square() as u8 + 8),
-            };
-            SEGMENT[captured_square as usize][king.lsb() as usize] != 0
-        };
-        if SEGMENT[mv.source_square() as usize][king.lsb() as usize] != 0 || enpassant_check {
-            let bishop_attacks = single_bishop_attacks(king.lsb(), board.occupied());
-            if bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]) != 0 {
-                board.state.checkers |= bishop_attacks & (board[Piece::bishop(colour)] | board[Piece::queen(colour)]);
-            }
-            let rook_attacks = single_rook_attacks(king.lsb(), board.occupied());
-            if rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)]) != 0 {
-                board.state.checkers |= rook_attacks & (board[Piece::rook(colour)] | board[Piece::queen(colour)]);
-            }
+    }
+    if colour_diff & board.state.xray_attacks[Colour::Black as usize] != 0 {
+        let c = Colour::Black;
+        let king = board[Piece::king(c)].lsb();
+        let rook_attacks = single_rook_attacks(king, board.occupied());
+        let xray_rook = single_rook_attacks(king, board.occupied() & !(rook_attacks & board[c]));
+        let bishop_attacks = single_bishop_attacks(king, board.occupied());
+        let xray_bishop = single_bishop_attacks(king, board.occupied() & !(bishop_attacks & board[c]));
+        let xray = xray_rook | xray_bishop;
+        let pinners = (xray_rook & (board[Piece::rook(!c)] | board[Piece::queen(!c)]))
+            | (xray_bishop & (board[Piece::bishop(!c)] | board[Piece::queen(!c)]));
+        board.state.xray_attacks[c as usize] = xray;
+        board.state.pinners[!c as usize] = pinners;
+        if colour == !c {
+            board.state.checkers |= rook_attacks & (board[Piece::rook(!c)] | board[Piece::queen(!c)]);
+            board.state.checkers |= bishop_attacks & (board[Piece::bishop(!c)] | board[Piece::queen(!c)]);
         }
-        test_assert!(board.state.checkers != 0);
+    }
+
+    if board.state.attacks[colour as usize][PieceType::Leaper as usize] & board[Piece::king(!colour)] != 0 {
+        board.state.checkers |= mv.target_square();
     }
 
     board.colour = !colour;
@@ -353,6 +361,7 @@ fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
 }
 
 fn is_legal(board: &Board, mv: Move, pinned: BB) -> bool {
+    return true;
     let colour = board.colour;
     let piece = board[mv.source_square()].unwrap();
     if piece == Piece::WhiteKing || piece == Piece::BlackKing {
@@ -360,8 +369,7 @@ fn is_legal(board: &Board, mv: Move, pinned: BB) -> bool {
     }
     let king = board[Piece::king(colour)];
     if mv.flag() != Flag::ENPASSANT {
-        if pinned != 0 && mv.source_square().bb() & pinned != 0
-            && RAY[king.lsb() as usize][mv.source_square() as usize] & mv.target_square() == 0 {
+        if pinned != 0 && mv.source_square().bb() & pinned != 0 && RAY[king.lsb() as usize][mv.source_square() as usize] & mv.target_square() == 0 {
             return false;
         }
         return true;

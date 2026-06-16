@@ -2,7 +2,7 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move, MoveList, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub const TIMEOUT_MOD: u64 = 1 << 13;
 
@@ -190,45 +190,111 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     }
 
     // Try to create a beta cutoff by making the tt move first
-    if let Some(mv) = tt_move {
-        if !board.is_legal_partial(mv) {
-            tt_move = None;
+    if tt_move.is_some() && !board.is_legal_partial(tt_move.unwrap()) {
+        tt_move = None;
+    }
+
+    let mut movelist = MoveList::new();
+    let mut scores = [0; 218];
+    let mut singularity_searched = 0;
+
+    if let Some(tt_mv) = tt_move {
+        let unmake_info = board.makemove(tt_mv);
+        moved = true;
+        let tt_score = if board.is_rule_draw() { 0 } else {
+            -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
+        };
+        add_proms = board.unmakemove(tt_mv, tt_score, unmake_info, None);
+        if tt_score > alpha {
+            alpha = tt_score;
         } else {
-            let unmake_info = board.makemove(mv);
-            moved = true;
-            let score = if board.is_rule_draw() { 0 } else {
-                -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
-            };
-            add_proms = board.unmakemove(mv, score, unmake_info, None);
-            if score > alpha {
-                alpha = score;
+            if ply > 0 && depth <= 3 && !in_check && !is_pv && tt_score <= alpha - TT_FUTILITY_MARGIN * depth as Eval && alpha < MATE_CUTOFF {
+                skip_quiets = true;
+            }
+        }
+        if alpha >= beta {
+            state.beta_cutoff(tt_mv, board.move_history.last().copied(), depth, ply, &[]);
+            if board.state.repetitions <= 1 {
+                let tt_entry = TTEntry::new(board.state.hash, tt_score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
+                state.tt.insert(tt_entry, ply);
+            }
+            return (tt_move, tt_score)
+        }
+        if !tt_mv.is_capture() {
+            tried_quiets[tried_quiets_idx] = tt_mv;
+            tried_quiets_idx += 1;
+        }
+        best_score = tt_score;
+        best_move = tt_move;
+        // singularity extensions: if there is only one good move, search deeper
+        if depth >= 99 && tt_score.abs() >= MATE_CUTOFF {
+            movelist = board.generate_movelist(false);
+            scores = movelist.score(board, state, tt_move, ply);
+            movelist.sort(&mut scores);
+            if add_proms {
+                add_proms = false;
+                let prom = tt_mv;
+                if prom.is_capture() {
+                    movelist.add(Move::new(Flag::ROOKPROMCAP, prom.target_square(), prom.source_square()));
+                    movelist.add(Move::new(Flag::BISHOPPROMCAP, prom.target_square(), prom.source_square()));
+                } else {
+                    movelist.add(Move::new(Flag::ROOKPROM, prom.target_square(), prom.source_square()));
+                    movelist.add(Move::new(Flag::BISHOPPROM, prom.target_square(), prom.source_square()));
+                }
+            }
+            let singularity_beta = if depth >= 12 {
+                tt_score - 33 - 20 * is_pv as Eval
             } else {
-                if ply > 0 && depth <= 3 && !in_check && !is_pv && score <= alpha - TT_FUTILITY_MARGIN * depth as Eval && alpha < MATE_CUTOFF {
-                    skip_quiets = true;
+                tt_score - 40 - 30 * is_pv as Eval
+            };
+            let mut fail_high = false;
+            let mut i = 1;
+            while i < movelist.length {
+                let mv = movelist[i];
+                singularity_searched = i;
+                i += 1;
+                let unmake = board.makemove(mv);
+                let score = if board.is_rule_draw() { 0 } else {
+                    -negamax(stop_flag, board, state, depth / 2, ply + 1, -singularity_beta - 1, -singularity_beta, true).1
+                };
+                board.unmakemove(mv, score, unmake, Some(&mut movelist));
+                if score >= singularity_beta {
+                    fail_high = true;
+                    movelist.shift(&mut scores, i - 1, 1);
+                    break;
                 }
             }
-            if alpha >= beta {
-                state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &[]);
-                if board.state.repetitions <= 1 {
-                    let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
-                    state.tt.insert(tt_entry, ply);
-                }
-                return (tt_move, score)
+
+            if !fail_high {
+                let singularity_depth = depth;
+                let score = 
+                if depth + ply >= state.max_depth {
+                    // same search as original search
+                    tt_score
+                } else {
+                    let unmake = board.makemove(tt_mv);
+                    let score = if board.is_rule_draw() { 0 } else {
+                        -negamax(stop_flag, board, state, singularity_depth, ply + 1, -beta, -original_alpha, true).1
+                    };
+                    board.unmakemove(tt_mv, 0, unmake, None);
+                    score
+                };
+                let flag = if score >= beta { TTFlag::LowerBound }
+                    else if score <= original_alpha { TTFlag::UpperBound }
+                    else { TTFlag::Exact };
+                let tt_entry = TTEntry::new(board.state.hash, score, flag, Some(tt_mv), singularity_depth, state.tt.generation());
+                state.tt.insert(tt_entry, ply);
+                return (Some(tt_mv), score);
             }
-            if !mv.is_capture() {
-                tried_quiets[tried_quiets_idx] = mv;
-                tried_quiets_idx += 1;
-            }
-            best_score = score;
-            best_move = tt_move;
         }
     }
 
     // If we haven't cut off, we have to start exploring more moves
-    let mut movelist = board.generate_movelist(false);
-    let mut scores = movelist.score(board, state, tt_move, ply);
-    movelist.sort(&mut scores);
-    if add_proms {
+    if movelist.length == 0 {
+        movelist = board.generate_movelist(false);
+        scores = movelist.score(board, state, tt_move, ply);
+        movelist.sort(&mut scores);
+    } else if add_proms {
         let prom = tt_move.unwrap();
         if prom.is_capture() {
             movelist.add(Move::new(Flag::ROOKPROMCAP, prom.target_square(), prom.source_square()));
@@ -275,7 +341,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             }
         };
         moved = true;
-        board.unmakemove(mv, score, unmake_info, Some(&mut movelist));
+        board.unmakemove(mv, score, unmake_info, if i > singularity_searched { Some(&mut movelist) } else { None });
         if score > best_score {
             best_score = score;
             best_move = Some(mv);

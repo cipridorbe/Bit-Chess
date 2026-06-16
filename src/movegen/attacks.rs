@@ -153,15 +153,22 @@ impl Board {
         out
     }
 
-    pub fn pinned_and_pinners(&self) -> (BB, BB) {
-        let colour = self.colour;
+    pub fn compute_raw_xray_and_pinners(&self, colour: Colour) -> (BB, BB) {
         let king = self[Piece::king(colour)].lsb();
         let rook_attacks = single_rook_attacks(king, self.occupied());
         let xray_rook = single_rook_attacks(king, self.occupied() & !(rook_attacks & self[colour]));
         let bishop_attacks = single_bishop_attacks(king, self.occupied());
         let xray_bishop = single_bishop_attacks(king, self.occupied() & !(bishop_attacks & self[colour]));
-        let mut pinners = xray_rook & (self[Piece::rook(!colour)] | self[Piece::queen(!colour)]);
-        pinners |= xray_bishop & (self[Piece::bishop(!colour)] | self[Piece::queen(!colour)]);
+        let xray = xray_rook | xray_bishop;
+        let pinners = (xray_rook & (self[Piece::rook(!colour)] | self[Piece::queen(!colour)]))
+            | (xray_bishop & (self[Piece::bishop(!colour)] | self[Piece::queen(!colour)]));
+        (xray, pinners)
+    }
+
+    pub fn pinned_and_pinners(&self) -> (BB, BB) {
+        let colour = self.colour;
+        let king = self[Piece::king(colour)].lsb();
+        let pinners = self.state.pinners[!colour as usize];
         let mut pinned = BB::new(0);
         for pinner in pinners.squares() {
             pinned |= SEGMENT[pinner as usize][king as usize] & self[colour];

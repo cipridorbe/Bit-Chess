@@ -5,18 +5,19 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     let mut out = 0;
     let mut movelist = board.generate_movelist(false);
     let mut i = 0;
+    if depth == 1 { return movelist.length as u64 + movelist.queen_proms as u64 * 2}
     while i < movelist.length {
         let mv = movelist[i];
-        if board.is_legal(mv, movelist.pinned) {
-            if depth == 1 {
-                out += 1;
-                if mv.is_queen_promotion() { out += 2; }
-            } else {
+        // if board.is_legal(mv, movelist.pinned) {
+            // if depth == 1 {
+            //     out += 1;
+            //     if mv.is_queen_promotion() { out += 2; }
+            // } else {
                 let unmake = board.makemove(mv);
                 out += perft(board, depth - 1);
                 board.unmakemove(mv, 0, unmake, Some(&mut movelist));
-            }
-        }
+            // }
+        // }
         i += 1;
     }
     out

@@ -221,6 +221,7 @@ pub struct MoveList {
     pub length: usize,
     captures: usize,
     pub pinned: BB,
+    pub queen_proms: u8
 }
 
 impl MoveList {
@@ -231,6 +232,7 @@ impl MoveList {
             length: 0,
             captures: 0,
             pinned: BB::new(0),
+            queen_proms: 0
         }
     }
 
@@ -289,6 +291,21 @@ impl MoveList {
             self[j] = mv;
             scores[j] = score;
         }
+    }
+
+    // shifts a move upwards
+    #[inline]
+    pub fn shift(&mut self, scores: &mut [MoveScore; 218], start: usize, end: usize) {
+        let mv = self[start];
+        let score = scores[start];
+        let mut i = start;
+        while i > end {
+            self[i] = self[i - 1];
+            scores[i] = scores[i - 1];
+            i -= 1;
+        }
+        self[end] = mv;
+        scores[end] = score; 
     }
 }
 

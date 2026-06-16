@@ -185,6 +185,118 @@ mod test {
         assert!(elapsed < Duration::from_millis(500), "search took {:?}, did not stop promptly", elapsed);
     }
 
+    // Measures score variance between depth and depth/2 across bench positions to calibrate
+    // the singular extension margin. Run with: cargo test --release test_singular_margin -- --nocapture
+    #[test]
+    fn test_singular_margin() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        use crate::eval::INF;
+        use crate::repr::board::Board;
+        use crate::search::{negamax::negamax, state::SearchState};
+
+        let test_depths: &[u8] = &[8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let stop = Arc::new(AtomicBool::new(false));
+
+        let positions = crate::eval::tests::TEST_POSITIONS;
+        eprintln!("\n|score(depth) - score(depth/2)| across {} positions", positions.len());
+        eprintln!("{:<8} {:>8} {:>8} {:>8} {:>8} {:>8}", "depth", "mean", "p50", "p75", "p90", "max");
+
+        for &depth in test_depths {
+            let half = depth / 2;
+            let mut diffs: Vec<i16> = Vec::new();
+
+            for &(_name, fen) in positions {
+                let mut board = Board::from_fen(fen);
+
+                let mut state_half = SearchState::new_default();
+                state_half.new_search();
+                state_half.max_depth = half + half / 2;
+                let (_, score_half) = negamax(&stop, &mut board, &mut state_half, half, 0, -INF, INF, false);
+
+                let mut state_full = SearchState::new_default();
+                state_full.new_search();
+                state_full.max_depth = depth + depth / 2;
+                let (_, score_full) = negamax(&stop, &mut board, &mut state_full, depth, 0, -INF, INF, false);
+
+                if score_full.abs() < crate::eval::MATE_CUTOFF && score_half.abs() < crate::eval::MATE_CUTOFF {
+                    diffs.push((score_full - score_half).abs());
+                }
+            }
+
+            diffs.sort();
+            let n = diffs.len();
+            let mean = diffs.iter().map(|&d| d as f64).sum::<f64>() / n as f64;
+            let p50 = diffs[n * 50 / 100];
+            let p75 = diffs[n * 75 / 100];
+            let p90 = diffs[n * 90 / 100];
+            let max = diffs[n - 1];
+            eprintln!("{}/{:<4}   {:>8.0} {:>8} {:>8} {:>8} {:>8}   (cur margin: {})",
+                depth, half, mean, p50, p75, p90, max, 2 * depth as i16);
+        }
+    }
+
+    // Tests singular extension effectiveness on positions with known forcing lines.
+    // Run twice — once with singular extensions enabled and once with depth >= 99 to disable —
+    // and compare depth reached and nodes searched at equal time.
+    // Run with: cargo test --release test_singular_effectiveness -- --nocapture
+    #[test]
+    fn test_singular_effectiveness() {
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+        use crate::repr::board::Board;
+        use crate::search::{MAX_PLY, negamax::search, state::SearchState};
+
+        // Positions chosen for long forcing lines (sacrifices, forced exchanges, mating attacks)
+        let positions: &[(&str, &str)] = &[
+            ("Pos 1",   "6k1/1q4p1/5p1p/2Pn3Q/3p4/6P1/2r2PNP/5RK1 w - - 0 1"),
+            ("Pos 2",  "8/1B2r1p1/5k1p/8/5P2/PR3K1b/8/8 b - - 0 1"),
+            ("Rook vs passed pawns",   "5r1k/6pp/1n2Q3/4p3/8/7P/PP4PK/R1B1q3 b - - 0 1"),
+            ("Endgame breakthrough",   "8/4p3/p2p4/2pP4/2P1P3/1P4k1/1P1K4/8 w - - 0 1"),
+            ("Exchange sacrifice",     "2r2rk1/1bqnbpp1/1p1ppn1p/pP6/N1P1P3/P2B1N1P/1B2QPP1/R2R2K1 b - - 0 1"),
+        ];
+
+        const TIME_PER_MOVE: Duration = Duration::from_millis(1000);
+        const MOVES: usize = 4;
+
+        eprintln!("\nSingular extension effectiveness (500ms/move, {} moves each)", MOVES);
+        eprintln!("Disable SE by setting `depth >= 99` in negamax.rs and re-run to compare.\n");
+
+        let mut total_nodes = 0u64;
+        let mut total_depth = 0u32;
+
+        for (name, fen) in positions {
+            eprintln!("{}  [{}]", name, fen);
+            eprintln!("  {:<5} {:>7} {:>5} {:>12} {:>8}  best", "move", "score", "depth", "nodes", "knps");
+
+            let mut board = Board::from_fen(fen);
+            let mut state = SearchState::new_default();
+
+            for i in 0..MOVES {
+                let stop = Arc::new(AtomicBool::new(false));
+                let stop2 = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    std::thread::sleep(TIME_PER_MOVE);
+                    stop2.store(true, Ordering::Relaxed);
+                });
+                let start = Instant::now();
+                let (mv, score, depth, nodes) = search(&mut board, &mut state, MAX_PLY, &stop, Some(start + TIME_PER_MOVE));
+                let elapsed = start.elapsed();
+                let knps = nodes as f64 / elapsed.as_secs_f64() / 1000.0;
+                total_nodes += nodes;
+                total_depth += depth as u32;
+                let mv_str = mv.map(|m| m.to_uci()).unwrap_or_else(|| "none".to_string());
+                eprintln!("  {:<5} {:>7} {:>5} {:>12} {:>8.0}  {}", i + 1, score, depth, nodes, knps, mv_str);
+                match mv {
+                    Some(mv) => { let _ = board.makemove(mv); }
+                    None => break,
+                }
+            }
+            eprintln!();
+        }
+
+        let n = positions.len() as u32 * MOVES as u32;
+        eprintln!("totals: {} nodes, avg depth {:.1}", total_nodes, total_depth as f64 / n as f64);
+    }
+
     // Prints best move per depth from starting position to diagnose bad opening play.
     // Run with: cargo test test_opening_moves -- --nocapture
     #[test]
