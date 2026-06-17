@@ -16,7 +16,7 @@ CUTECHESS="/c/Program Files (x86)/Cute Chess/cutechess-cli.exe"
 BASELINE="baselines/default.exe"
 NAME=""
 DESCRIPTION=""
-GAMES=50
+GAMES=150
 TC="60+1"
 MAXDEPTH=""
 

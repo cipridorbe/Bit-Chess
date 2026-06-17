@@ -227,7 +227,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         best_score = tt_score;
         best_move = tt_move;
         // singularity extensions: if there is only one good move, search deeper
-        if depth >= 99 && tt_score.abs() >= MATE_CUTOFF {
+        if depth >= 7 && tt_score.abs() >= MATE_CUTOFF {
             movelist = board.generate_movelist(false);
             scores = movelist.score(board, state, tt_move, ply);
             movelist.sort(&mut scores);
