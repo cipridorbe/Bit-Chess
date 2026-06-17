@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, search::{MAX_PLY, tt::TT}};
+use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, repr::board::Board, search::{MAX_PLY, tt::TT}};
 
 #[derive(Clone)]
 pub struct SearchState {
@@ -8,6 +8,8 @@ pub struct SearchState {
     pub pawn_table: Arc<PawnTable>,
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
     pub history: [[MoveScore; 64]; 64],
+    // [prev_pieces][prev_target][piece][target]
+    pub continuation_history: Box<[[[[MoveScore; 64]; 12]; 64]; 12]>,
     pub counter_move: [[Option<Move>; 64]; 64],
     pub max_depth: u8,
     pub node_count: u64,
@@ -27,6 +29,7 @@ impl SearchState {
             pawn_table: Arc::new(PawnTable::new(pawn_table_bits)),
             killers: [[None; 2]; MAX_PLY as usize],
             history: [[0; 64]; 64],
+            continuation_history: Box::new([[[[0; 64]; 12]; 64]; 12]),
             counter_move: [[None; 64]; 64],
             max_depth: 0,
             node_count: 0,
@@ -59,6 +62,7 @@ impl SearchState {
             pawn_table: Arc::clone(&self.pawn_table),
             killers: self.killers.clone(),
             history: self.history.clone(),
+            continuation_history: self.continuation_history.clone(),
             counter_move: self.counter_move.clone(),
             max_depth: self.max_depth,
             node_count: 0,
@@ -68,16 +72,13 @@ impl SearchState {
         }
     }
 
-    pub fn beta_cutoff(&mut self, mv: Move, prev_move: Option<Move>, depth: u8, ply: u8, tried_quiets: &[Move]) {
+    pub fn beta_cutoff(&mut self, board: &Board, mv: Move, depth: u8, ply: u8, tried_quiets: &[Move]) {
         if mv.is_capture() {
             return;
         }
         if self.killers[ply as usize][0] != Some(mv) {
             self.killers[ply as usize][1] = self.killers[ply as usize][0];
             self.killers[ply as usize][0] = Some(mv);
-        }
-        if let Some(prev) = prev_move {
-            self.counter_move[prev.source_square() as usize][prev.target_square() as usize] = Some(mv);
         }
         let bonus = (depth * depth) as i16;
         let entry = self.history[mv.source_square() as usize][mv.target_square() as usize];
@@ -87,6 +88,20 @@ impl SearchState {
             let entry = self.history[quiet.source_square() as usize][quiet.target_square() as usize];
             self.history[quiet.source_square() as usize][quiet.target_square() as usize]
                 += -bonus - (entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
+        }
+        if let Some(prev) = board.move_history.last().copied() {
+            if prev != Move::NULL_MOVE {
+                self.counter_move[prev.source_square() as usize][prev.target_square() as usize] = Some(mv);
+                let prev_piece = board[prev.target_square()].unwrap();
+                let piece = board[mv.source_square()].unwrap();
+                let entry = &mut self.continuation_history[prev_piece as usize][prev.target_square() as usize][piece as usize][mv.target_square() as usize];
+                *entry += bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
+                for quiet in tried_quiets {
+                    let quiet_p = board[quiet.source_square()].unwrap();
+                    let entry = &mut self.continuation_history[prev_piece as usize][prev.target_square() as usize][quiet_p as usize][quiet.target_square() as usize];
+                    *entry += -bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
+                }
+            }
         }
     }
 }

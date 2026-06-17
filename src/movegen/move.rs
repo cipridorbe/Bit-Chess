@@ -190,7 +190,7 @@ impl Move {
         self.0.get() & (1 << Move::PROMOTION_OFFSET) != 0
     }
 
-    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], counter_move: Option<Move>) -> MoveScore {
+    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], continuation_history: &Box<[[[[MoveScore; 64]; 12]; 64]; 12]>, counter_move: Option<Move>) -> MoveScore {
         if Some(self) == tt_move { return TTSCORE; }
         if Some(self) == killers[0] { return KILLERS_SCORE[0]; }
         if Some(self) == killers[1] { return KILLERS_SCORE[1]; }
@@ -199,7 +199,16 @@ impl Move {
             return see_mvvlva(board, self);
         } else {
             if self.is_queen_promotion() { return QUEEN_QUIET_PROM_SCORE; }
-            return history[self.source_square() as usize][self.target_square() as usize];
+            let h = history[self.source_square() as usize][self.target_square() as usize];
+            if let Some(prev) = board.move_history.last().copied() {
+                if prev != Move::NULL_MOVE {
+                    let prev_p = board[prev.target_square()].unwrap();
+                    let curr_p = board[self.source_square()].unwrap();
+                    let c = continuation_history[prev_p as usize][prev.target_square() as usize][curr_p as usize][self.target_square() as usize];
+                    return h / 2 + c / 2;
+                }
+            }
+            h / 2
         }
     }
 
@@ -264,7 +273,7 @@ impl MoveList {
             search_state.counter_move[prev.source_square() as usize][prev.target_square() as usize]
         );
         while i < self.length {
-            out[i] = self[i].score(board, tt_move, killers, &search_state.history, counter_move);
+            out[i] = self[i].score(board, tt_move, killers, &search_state.history, &search_state.continuation_history, counter_move);
             i += 1;
         }
         out

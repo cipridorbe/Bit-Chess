@@ -13,6 +13,7 @@ pub const MATE_CUTOFF: Eval = MATE - MAX_PLY as Eval * 2;
 pub const EVAL_BONUS_DELTA_OUTER: Eval = 115;
 pub const EVAL_BONUS_DELTA_INNER: Eval = 60;
 
+const SIDE_TO_MOVE_BONUS: Eval = 10;
 const BATTERY_BONUS: Eval = 25;
 const OUTPOST_BONUS: Eval = 40;
 const MISSING_PAWN_BONUS_KNIGHT: [Eval; 9] = [30, 15, 0, -5, -20, -25, -30, -35, -45];
@@ -25,21 +26,21 @@ pub fn partial_relative_eval(board: &Board, search_state: &mut SearchState, alph
     let mult = if board.colour == Colour::White { 1 } else { -1 };
     let mut partial_eval = phase_eval(board.state.phase_unbounded, board.state.mg_eval, board.state.eg_eval);
     if partial_eval * mult <= alpha - EVAL_BONUS_DELTA_OUTER || partial_eval * mult >= beta + EVAL_BONUS_DELTA_OUTER {
-        return mult * partial_eval;
+        return mult * partial_eval + SIDE_TO_MOVE_BONUS;
     }
     let entry = pawn_bonus(board, search_state);
     partial_eval += phase_eval(board.state.phase_unbounded, entry.mg_eval, entry.eg_eval);
     if partial_eval * mult <= alpha - EVAL_BONUS_DELTA_INNER || partial_eval * mult >= beta + EVAL_BONUS_DELTA_INNER {
-        return mult * partial_eval;
+        return mult * partial_eval + SIDE_TO_MOVE_BONUS;
     }
     partial_eval += bonus_eval_non_pawn(board, entry.files);
-    mult * partial_eval
+    mult * partial_eval + SIDE_TO_MOVE_BONUS
 }
 
 pub fn relative_eval(board: &Board, search_state: &mut SearchState) -> Eval {
     let mult = if board.colour == Colour::White { 1 } else { -1 };
     let partial_eval = phase_eval(board.state.phase_unbounded, board.state.mg_eval, board.state.eg_eval);
-    mult * (partial_eval + bonus_eval(board, search_state))
+    mult * (partial_eval + bonus_eval(board, search_state)) + SIDE_TO_MOVE_BONUS
 }
 
 fn bonus_eval(board: &Board, search_state: &mut SearchState) -> Eval {
@@ -181,7 +182,7 @@ pub(crate) mod tests {
 
     // Depth for the bonus distribution test. Depth 4 gives ~10M positions
     // across the 8 perft positions and finishes in a few seconds in release mode.
-    const BONUS_DIST_DEPTH: u32 = 3;
+    const BONUS_DIST_DEPTH: u32 = 4;
 
     fn collect_bonus(board: &mut Board, state: &mut SearchState, depth: u32, bonus: &mut Vec<i32>, pawn_vec: &mut Vec<i32>, phase: &mut Vec<i32>) {
         if depth == 0 {

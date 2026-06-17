@@ -2,12 +2,13 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval}, movegen::r#move::{Flag, Move, MoveList, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval, relative_eval}, movegen::r#move::{Flag, Move, MoveList, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub const TIMEOUT_MOD: u64 = 1 << 13;
 
 const ASPIRATION_WINDOW_DELTAS: [Eval; 2] = [25, 40];
 
+const NULL_MOVE_SEARCH_MARGIN: Eval = 65;
 const FUTILITY_MARGIN: Eval = 150;
 const TT_FUTILITY_MARGIN: Eval = 100;
 const REVERSE_FUTILITY_PRUNING_MARGIN: Eval = 215;
@@ -151,7 +152,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     let original_alpha = alpha;
 
     // Try to create a beta cutoff with a null move
-    if null_move_allowed && ply > 1 && !board.in_check() && depth >= 4 && board.state.phase_unbounded > 0 && beta < MATE_CUTOFF && !is_pv {
+    if null_move_allowed && ply > 1 && !board.in_check() && depth >= 4 && board.state.phase_unbounded > 0 && beta < MATE_CUTOFF && !is_pv && relative_eval(board, state) >= beta - NULL_MOVE_SEARCH_MARGIN {
         let null_unmake = board.null_makemove();
         let score = -negamax(stop_flag, board, state, depth / 2, ply + 1, -beta-1, -beta, false).1;
         board.null_unmakemove(null_unmake);
@@ -189,6 +190,9 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
+    // SEE pruning
+    let see_pruning = ply > 0 && !is_pv && !in_check && depth == 1;
+
     // Try to create a beta cutoff by making the tt move first
     if tt_move.is_some() && !board.is_legal_partial(tt_move.unwrap()) {
         tt_move = None;
@@ -213,7 +217,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             }
         }
         if alpha >= beta {
-            state.beta_cutoff(tt_mv, board.move_history.last().copied(), depth, ply, &[]);
+            state.beta_cutoff(board, tt_mv, depth, ply, &[]);
             if board.state.repetitions <= 1 {
                 let tt_entry = TTEntry::new(board.state.hash, tt_score, TTFlag::LowerBound, tt_move, depth, state.tt.generation());
                 state.tt.insert(tt_entry, ply);
@@ -227,7 +231,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         best_score = tt_score;
         best_move = tt_move;
         // singularity extensions: if there is only one good move, search deeper
-        if depth >= 7 && tt_score.abs() >= MATE_CUTOFF {
+        if depth >= 99 && tt_score.abs() >= MATE_CUTOFF {
             movelist = board.generate_movelist(false);
             scores = movelist.score(board, state, tt_move, ply);
             movelist.sort(&mut scores);
@@ -305,7 +309,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
-    let mut futility_exit = false;
+    let mut early_exit = false;
     let mut i = if tt_move.is_none() { 0 } else { 1 };
     while i < movelist.length {
         if state.stop_search {
@@ -317,6 +321,14 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         if !board.is_legal(mv, movelist.pinned) {
             continue;
         }
+        if moved && skip_quiets && mv_prescore <= REGULAR_QUIET_SCORE && best_score > -MATE_CUTOFF{
+            early_exit = true;
+            break;
+        }
+        if moved && see_pruning && mv.is_capture() && mv_prescore < 0 && best_score > -MATE_CUTOFF {
+            early_exit = true;
+            break;
+        }
         let unmake_info = board.makemove(mv);
 
         let score = if board.is_rule_draw() { 0 } else {
@@ -324,11 +336,6 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             if !moved {
                 -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
             } else {
-                if skip_quiets && mv_prescore <= REGULAR_QUIET_SCORE {
-                    futility_exit = true;
-                    board.unmakemove(mv, 0, unmake_info, None);
-                    break;
-                }
                 let mut reduced_search_depth = depth - 1;
                 if depth >= 3 && tried_quiets_idx >= 3 && !in_check && ply > 1 && !mv.is_queen_promotion() {
                     reduced_search_depth = (depth - 1).saturating_sub(LMR_TABLE[depth.min(63) as usize][i.min(63) as usize]);
@@ -350,7 +357,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             alpha = score;
         }
         if alpha >= beta {
-            state.beta_cutoff(mv, board.move_history.last().copied(), depth, ply, &tried_quiets[..tried_quiets_idx]);
+            state.beta_cutoff(board, mv, depth, ply, &tried_quiets[..tried_quiets_idx]);
             break;
         }
         if !mv.is_capture() && !mv.is_queen_promotion() {
@@ -363,7 +370,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         return (None, if in_check { -(MATE - ply as Eval) } else { 0 });
     }
 
-    if board.state.repetitions <= 1 && !futility_exit {
+    if board.state.repetitions <= 1 && !early_exit {
         let tt_flag = 
             if best_score >= beta { TTFlag::LowerBound }
             else if best_score <= original_alpha { TTFlag::UpperBound }
