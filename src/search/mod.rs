@@ -54,9 +54,8 @@ mod test {
         const VERBOSE: bool = true;
 
         let mut total_nodes: u64 = 0;
-        let mut total_depth: u32 = 0;
-        let mut total_searches: u32 = 0;
         let mut total_time = Duration::ZERO;
+        let mut depths: Vec<u8> = Vec::new();
 
         for &fen in BENCH_POSITIONS {
             let mut board = Board::from_fen(fen);
@@ -74,9 +73,8 @@ mod test {
                 let elapsed = start.elapsed();
                 let knps = nodes as f64 / elapsed.as_secs_f64() / 1000.0;
                 total_nodes += nodes;
-                total_depth += depth as u32;
-                total_searches += 1;
                 total_time += elapsed;
+                depths.push(depth);
                 if VERBOSE {
                     eprintln!("  move {}: depth={:>2}  knps={:>8.0}  time={:.2?}", i + 1, depth, knps, elapsed);
                 }
@@ -87,13 +85,18 @@ mod test {
             }
         }
 
+        depths.sort();
+        let n = depths.len();
+        let avg_depth = depths.iter().map(|&d| d as f64).sum::<f64>() / n as f64;
+        let p25 = depths[n * 25 / 100];
+        let p50 = depths[n * 50 / 100];
+        let p75 = depths[n * 75 / 100];
         let total_knps = total_nodes as f64 / total_time.as_secs_f64() / 1000.0;
-        let avg_depth = total_depth as f64 / total_searches as f64;
         eprintln!("\n  positions : {}", BENCH_POSITIONS.len());
-        eprintln!("  searches  : {}", total_searches);
+        eprintln!("  searches  : {}", n);
         eprintln!("  nodes     : {} ({:.0} knps)", total_nodes, total_knps);
         eprintln!("  time      : {:.2?}", total_time);
-        eprintln!("  avg depth : {:.1}", avg_depth);
+        eprintln!("  avg depth : {:.1}  (p25={} p50={} p75={})", avg_depth, p25, p50, p75);
     }
 
     #[test]

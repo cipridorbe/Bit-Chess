@@ -8,16 +8,10 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     if depth == 1 { return movelist.length as u64 + movelist.queen_proms as u64 * 2}
     while i < movelist.length {
         let mv = movelist[i];
-        // if board.is_legal(mv, movelist.pinned) {
-            // if depth == 1 {
-            //     out += 1;
-            //     if mv.is_queen_promotion() { out += 2; }
-            // } else {
-                let unmake = board.makemove(mv);
-                out += perft(board, depth - 1);
-                board.unmakemove(mv, 0, unmake, Some(&mut movelist));
-            // }
-        // }
+        let unmake = board.makemove(mv);
+        out += perft(board, depth - 1);
+        board.unmakemove(mv, unmake);
+        movelist.maybe_add_proms(0, Some(mv), i);
         i += 1;
     }
     out
@@ -220,7 +214,8 @@ mod debug {
                 let n = perft(&mut clone, depth - 1);
                 *map.entry(mv.to_uci()).or_insert(0) += n;
             }
-            clone.unmakemove(mv, 0, unmake, Some(&mut movelist));
+            clone.unmakemove(mv, unmake);
+            movelist.maybe_add_proms(0, Some(mv), i);
             i += 1;
         }
         map

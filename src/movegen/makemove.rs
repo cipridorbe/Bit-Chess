@@ -240,7 +240,7 @@ fn makemove(board: &mut Board, mv: Move) -> UnmakeInfo {
     board.state.hash ^= Hash::CASTLING_HASH[board.castling_rights.0 as usize];
     board.add_hash_to_history(board.state.hash);
 
-    board.move_history.push(mv);
+    board.move_history.push((mv, Some(piece)));
 
     unmake_info
 }
@@ -263,15 +263,14 @@ fn null_makemove(board: &mut Board) -> NullUnmakeInfo {
 
     board.colour = !colour;
     board.hash_history.push(board.state.hash);
-    board.move_history.push(Move::NULL_MOVE);
+    board.move_history.push((Move::NULL_MOVE, None));
     board.state.repetitions = 1;
     board.state.checkers = BB::new(0);
 
     null_unmake_info
 }
 
-fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) -> bool {
-    let mut out = false;
+fn unmakemove(board: &mut Board, mv: Move, unmake_info: UnmakeInfo) {
     let colour = board.colour;
 
     let piece = unmake_info.piece;
@@ -290,18 +289,6 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
         };
         board[Piece::pawn(colour)] |= square;
         board[square] = Some(Piece::pawn(colour));
-    } else if mv.is_queen_promotion() && mv_score == 0 {
-        if let Some(movelist) = movelist {
-            if mv.is_capture() {
-                movelist.add_to_end(Move::new(Flag::BISHOPPROMCAP, mv.target_square(), mv.source_square()));
-                movelist.add_to_end(Move::new(Flag::ROOKPROMCAP, mv.target_square(), mv.source_square()));
-            } else {
-                movelist.add_to_end(Move::new(Flag::BISHOPPROM, mv.target_square(), mv.source_square()));
-                movelist.add_to_end(Move::new(Flag::ROOKPROM, mv.target_square(), mv.source_square()));
-            }
-        } else {
-            out = true;
-        }
     }
 
     if let Some(captured_piece) = captured {
@@ -345,7 +332,6 @@ fn unmakemove(board: &mut Board, mv: Move, mv_score: Eval, unmake_info: UnmakeIn
     }
     
     board.colour = !colour;
-    out
 }
 
 fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
@@ -360,80 +346,80 @@ fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
     board.move_history.pop();
 }
 
-fn is_legal(board: &Board, mv: Move, pinned: BB) -> bool {
-    return true;
-    let colour = board.colour;
-    let piece = board[mv.source_square()].unwrap();
-    if piece == Piece::WhiteKing || piece == Piece::BlackKing {
-        return true;
-    }
-    let king = board[Piece::king(colour)];
-    if mv.flag() != Flag::ENPASSANT {
-        if pinned != 0 && mv.source_square().bb() & pinned != 0 && RAY[king.lsb() as usize][mv.source_square() as usize] & mv.target_square() == 0 {
-            return false;
-        }
-        return true;
-    } else {
-        let captured_square = match colour {
-            Colour::White => Square::from_u8(mv.target_square() as u8 - 8),
-            Colour::Black => Square::from_u8(mv.target_square() as u8 + 8),
-        };
-        let new_occupied = (board.occupied() & !mv.source_square().bb() & !captured_square.bb()) | mv.target_square();
-        if SEGMENT[king.lsb() as usize][mv.source_square() as usize] != 0 && board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) != 0 {
-            let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-            if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
-                return false;
-            }
-            let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-            if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
-                return false;
-            }
-        }
-        if SEGMENT[king.lsb() as usize][captured_square as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) == 0 {
-            return true;
-        }
-        let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
-            return false;
-        }
-        let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
-        if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
-            return false;
-        }
-        return true;
-    }
-}
+// fn is_legal(board: &Board, mv: Move, pinned: BB) -> bool {
+//     return true;
+//     let colour = board.colour;
+//     let piece = board[mv.source_square()].unwrap();
+//     if piece == Piece::WhiteKing || piece == Piece::BlackKing {
+//         return true;
+//     }
+//     let king = board[Piece::king(colour)];
+//     if mv.flag() != Flag::ENPASSANT {
+//         if pinned != 0 && mv.source_square().bb() & pinned != 0 && RAY[king.lsb() as usize][mv.source_square() as usize] & mv.target_square() == 0 {
+//             return false;
+//         }
+//         return true;
+//     } else {
+//         let captured_square = match colour {
+//             Colour::White => Square::from_u8(mv.target_square() as u8 - 8),
+//             Colour::Black => Square::from_u8(mv.target_square() as u8 + 8),
+//         };
+//         let new_occupied = (board.occupied() & !mv.source_square().bb() & !captured_square.bb()) | mv.target_square();
+//         if SEGMENT[king.lsb() as usize][mv.source_square() as usize] != 0 && board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) != 0 {
+//             let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+//             if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
+//                 return false;
+//             }
+//             let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+//             if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+//                 return false;
+//             }
+//         }
+//         if SEGMENT[king.lsb() as usize][captured_square as usize] == 0 || board.state.attacks[!colour as usize][PieceType::Slider as usize] & (mv.source_square().bb() | captured_square.bb()) == 0 {
+//             return true;
+//         }
+//         let rook = single_rook_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+//         if rook & (board[Piece::rook(!colour)] | board[Piece::queen(!colour)]) != 0 {
+//             return false;
+//         }
+//         let bishop = single_bishop_attacks(king.lsb(), new_occupied) & !mv.target_square().bb();
+//         if bishop & (board[Piece::bishop(!colour)] | board[Piece::queen(!colour)]) != 0 {
+//             return false;
+//         }
+//         return true;
+//     }
+// }
 
-fn is_legal_partial(board: &Board, mv: Move) -> bool {
-    let colour = board.colour;
-    let piece = board[mv.source_square()];
-    let captured = board[mv.target_square()];
-    if piece.is_none() || piece.unwrap().colour() != colour {
-        return false;
-    }
-    if mv.flag() == Flag::ENPASSANT {
-        if board.enpassant.is_none() || board.enpassant.unwrap().file() != mv.target_square().file() || captured.is_some() {
-            return false;
-        }
-    } else if mv.is_capture() {
-        if captured.is_none() || captured.unwrap().colour() != !colour {
-            return false;
-        }
-    } else {
-        if captured.is_some() {
-            return false;
-        }
-    }
-    true
-}
+// fn is_legal_partial(board: &Board, mv: Move) -> bool {
+//     let colour = board.colour;
+//     let piece = board[mv.source_square()];
+//     let captured = board[mv.target_square()];
+//     if piece.is_none() || piece.unwrap().colour() != colour {
+//         return false;
+//     }
+//     if mv.flag() == Flag::ENPASSANT {
+//         if board.enpassant.is_none() || board.enpassant.unwrap().file() != mv.target_square().file() || captured.is_some() {
+//             return false;
+//         }
+//     } else if mv.is_capture() {
+//         if captured.is_none() || captured.unwrap().colour() != !colour {
+//             return false;
+//         }
+//     } else {
+//         if captured.is_some() {
+//             return false;
+//         }
+//     }
+//     true
+// }
 
 impl Board {
     pub fn makemove(&mut self, mv: Move) -> UnmakeInfo {
         makemove(self, mv)
     }
 
-    pub fn unmakemove(&mut self, mv: Move, mv_score: Eval, unmake_info: UnmakeInfo, movelist: Option<&mut MoveList>) -> bool {
-        unmakemove(self, mv, mv_score, unmake_info, movelist)
+    pub fn unmakemove(&mut self, mv: Move, unmake_info: UnmakeInfo) {
+        unmakemove(self, mv, unmake_info);
     }
 
     pub fn null_makemove(&mut self) -> NullUnmakeInfo {
@@ -444,14 +430,14 @@ impl Board {
         null_unmakemove(self, null_unmake_info);
     }
 
-    pub fn is_legal(&self, mv: Move, pinned: BB) -> bool {
-        is_legal(self, mv, pinned)
-    }
+    // pub fn is_legal(&self, mv: Move, pinned: BB) -> bool {
+    //     is_legal(self, mv, pinned)
+    // }
 
-    pub fn is_legal_partial(&self, mv: Move) -> bool {
-        return true;
-        is_legal_partial(self, mv)
-    }
+    // pub fn is_legal_partial(&self, mv: Move) -> bool {
+    //     return true;
+    //     is_legal_partial(self, mv)
+    // }
 }
 
 /// Information stored when making a move to later unmake it

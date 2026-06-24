@@ -24,7 +24,7 @@
 
 use std::{num::NonZeroU16, ops::{Index, IndexMut}};
 
-use crate::{eval::Eval, repr::{bitboard::BB, board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::{see_mvvlva, see_sign}, state::SearchState}, test_assert};
+use crate::{eval::Eval, repr::{bitboard::BB, board::Board, colour::Colour, piece::Piece, square::Square}, search::{see::{see_mvvlva, see_sign}, state::{History, SearchState}}, test_assert};
 
 /// Maximum number of moves that can be made from any position
 pub const MAX_MOVES: usize = 218;
@@ -190,25 +190,16 @@ impl Move {
         self.0.get() & (1 << Move::PROMOTION_OFFSET) != 0
     }
 
-    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &[[MoveScore; 64]; 64], continuation_history: &Box<[[[[MoveScore; 64]; 12]; 64]; 12]>, counter_move: Option<Move>) -> MoveScore {
+    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &History, counter_move: Option<Move>) -> MoveScore {
         if Some(self) == tt_move { return TTSCORE; }
         if Some(self) == killers[0] { return KILLERS_SCORE[0]; }
         if Some(self) == killers[1] { return KILLERS_SCORE[1]; }
-        if Some(self) == counter_move { return COUNTERMOVE_SCORE; }
+        // if Some(self) == counter_move { return COUNTERMOVE_SCORE; }
         if self.is_capture() {
             return see_mvvlva(board, self);
         } else {
             if self.is_queen_promotion() { return QUEEN_QUIET_PROM_SCORE; }
-            let h = history[self.source_square() as usize][self.target_square() as usize];
-            if let Some(prev) = board.move_history.last().copied() {
-                if prev != Move::NULL_MOVE {
-                    let prev_p = board[prev.target_square()].unwrap();
-                    let curr_p = board[self.source_square()].unwrap();
-                    let c = continuation_history[prev_p as usize][prev.target_square() as usize][curr_p as usize][self.target_square() as usize];
-                    return h / 2 + c / 2;
-                }
-            }
-            h / 2
+            history.get(board, self)
         }
     }
 
@@ -226,8 +217,9 @@ impl Move {
 }
 
 pub struct MoveList {
-    moves: [Move; 218],
+    moves: [Move; MAX_MOVES],
     pub length: usize,
+    pub explored: isize,
     captures: usize,
     pub pinned: BB,
     pub queen_proms: u8
@@ -237,8 +229,9 @@ impl MoveList {
     /// Creates a new, empty movelist
     pub fn new() -> Self {
         MoveList {
-            moves: [Move::new_invalid(); 218],
+            moves: [Move::new_invalid(); MAX_MOVES],
             length: 0,
+            explored: 0,
             captures: 0,
             pinned: BB::new(0),
             queen_proms: 0
@@ -265,29 +258,29 @@ impl MoveList {
         }
     }
 
-    pub fn score(&self, board: &Board, search_state: &SearchState, tt_move: Option<Move>, ply: u8) -> [Eval; 218] {
-        let mut out = [0; 218];
+    pub fn score(&self, board: &Board, search_state: &SearchState, tt_move: Option<Move>, ply: u8) -> [Eval; MAX_MOVES] {
+        let mut out = [0; MAX_MOVES];
         let mut i = 0;
         let killers = &search_state.killers[ply as usize];
         let counter_move = board.move_history.last().and_then(|prev| 
-            search_state.counter_move[prev.source_square() as usize][prev.target_square() as usize]
+            search_state.counter_move[prev.0.source_square() as usize][prev.0.target_square() as usize]
         );
         while i < self.length {
-            out[i] = self[i].score(board, tt_move, killers, &search_state.history, &search_state.continuation_history, counter_move);
+            out[i] = self[i].score(board, tt_move, killers, &search_state.history, counter_move);
             i += 1;
         }
         out
     }
 
-    pub fn quiescense_score(&self, board: &Board) -> [Eval; 218] {
-        let mut out = [0; 218];
+    pub fn quiescense_score(&self, board: &Board) -> [Eval; MAX_MOVES] {
+        let mut out = [0; MAX_MOVES];
         for i in 0..self.length {
             out[i] = see_sign(board, self[i]);
         }
         out
     }
 
-    pub fn sort(&mut self, scores: &mut [MoveScore; 218]) {
+    pub fn sort(&mut self, scores: &mut [MoveScore; MAX_MOVES]) {
         for i in 1..self.length {
             let mv = self[i];
             let score = scores[i];
@@ -304,7 +297,7 @@ impl MoveList {
 
     // shifts a move upwards
     #[inline]
-    pub fn shift(&mut self, scores: &mut [MoveScore; 218], start: usize, end: usize) {
+    pub fn shift(&mut self, scores: &mut [MoveScore; MAX_MOVES], start: usize, end: usize) {
         let mv = self[start];
         let score = scores[start];
         let mut i = start;
@@ -315,6 +308,21 @@ impl MoveList {
         }
         self[end] = mv;
         scores[end] = score; 
+    }
+
+    #[inline]
+    pub fn maybe_add_proms(&mut self, score: Eval, mv: Option<Move>, i: usize) {
+        if i as isize > self.explored && score == 0 && mv.is_some() && mv.unwrap().is_queen_promotion() {
+            let tt_move = mv.unwrap();
+            if tt_move.is_capture() {
+                self.add(Move::new(Flag::ROOKPROMCAP, tt_move.target_square(), tt_move.source_square()));
+                self.add(Move::new(Flag::BISHOPPROMCAP, tt_move.target_square(), tt_move.source_square()));
+            } else {
+                self.add(Move::new(Flag::ROOKPROM, tt_move.target_square(), tt_move.source_square()));
+                self.add(Move::new(Flag::BISHOPPROM, tt_move.target_square(), tt_move.source_square()));
+            }
+        }
+        self.explored = self.explored.max(i as isize);
     }
 }
 

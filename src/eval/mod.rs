@@ -197,11 +197,10 @@ pub(crate) mod tests {
         let mut i = 0;
         while i < movelist.length {
             let mv = movelist[i];
-            if board.is_legal(mv, movelist.pinned) {
-                let unmake = board.makemove(mv);
-                collect_bonus(board, state, depth - 1, bonus, pawn_vec, phase);
-                board.unmakemove(mv, 0, unmake, Some(&mut movelist));
-            }
+            let unmake = board.makemove(mv);
+            collect_bonus(board, state, depth - 1, bonus, pawn_vec, phase);
+            board.unmakemove(mv, unmake);
+            movelist.maybe_add_proms(1, Some(mv), i);
             i += 1;
         }
     }

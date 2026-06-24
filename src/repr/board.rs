@@ -23,7 +23,7 @@ pub struct Board {
     /// History of all board positions
     pub hash_history: Vec<Hash>,
     /// History of all moves
-    pub move_history: Vec<Move>,
+    pub move_history: Vec<(Move, Option<Piece>)>,
     /// Additional state information
     pub state: BoardState,
 }
@@ -57,12 +57,12 @@ impl Board {
 
     /// Bitboard of attacks by the given colour to the other colour
     pub fn attacks(&self, colour: Colour) -> BB {
-        self.state.attacks[colour as usize][0] | self.state.attacks[colour as usize][1]
+        self.state.attacks[colour][0] | self.state.attacks[colour][1]
     }
 
     /// Whether or not the side to move is in check
     pub fn in_check(&self) -> bool {
-        test_assert!(((self.state.attacks[!self.colour as usize][0] | self.state.attacks[!self.colour as usize][1]) & self[Piece::king(self.colour)] != 0) == (self.state.checkers != 0)); 
+        test_assert!(((self.state.attacks[!self.colour][0] | self.state.attacks[!self.colour][1]) & self[Piece::king(self.colour)] != 0) == (self.state.checkers != 0)); 
         self.state.checkers != 0
     }
 
@@ -208,13 +208,13 @@ impl Board {
                 out[square] = Some(piece);
                 out[piece] |= square;
                 out[piece.colour()] |= square;
-                out.state.hash ^= Hash::POSITION_PIECE[piece as usize][square as usize];
+                out.state.hash ^= Hash::POSITION_PIECE[piece][square];
                 if piece.is_pawn_or_king() {
-                    out.state.pawn_hash ^= Hash::POSITION_PIECE[piece as usize][square as usize];
+                    out.state.pawn_hash ^= Hash::POSITION_PIECE[piece][square];
                 }
                 out.state.phase_unbounded += piece.phase_value();
-                out.state.mg_eval += PIECE_VALUE_MG[piece as usize] + PST_MG[piece as usize][square as usize];
-                out.state.eg_eval += PIECE_VALUE_EG[piece as usize] + PST_EG[piece as usize][square as usize];
+                out.state.mg_eval += PIECE_VALUE_MG[piece] + PST_MG[piece][square];
+                out.state.eg_eval += PIECE_VALUE_EG[piece] + PST_EG[piece][square];
                 file += 1;
             }
         }
@@ -235,13 +235,13 @@ impl Board {
 
         out.state.repetitions = 1;
         for (colour, piece_type) in [(Colour::White, PieceType::Leaper), (Colour::White, PieceType::Slider), (Colour::Black, PieceType::Leaper), (Colour::Black, PieceType::Slider)] {
-            out.state.attacks[colour as usize][piece_type as usize] = out.calculate_attacks(colour, piece_type)
+            out.state.attacks[colour][piece_type] = out.calculate_attacks(colour, piece_type)
         }
         out.state.checkers = out.calculate_checkers();
         for &colour in &[Colour::White, Colour::Black] {
             let (xray, pinners_bb) = out.compute_raw_xray_and_pinners(colour);
-            out.state.xray_attacks[colour as usize] = xray;
-            out.state.pinners[!colour as usize] = pinners_bb;
+            out.state.xray_attacks[colour] = xray;
+            out.state.pinners[!colour] = pinners_bb;
         }
         if (out.attacks(out.colour) & out[Piece::king(!out.colour)]) != 0 {
             panic!("Side not to move cannot be in check");
@@ -253,39 +253,39 @@ impl Board {
 impl Index<Piece> for Board {
     type Output = BB;
     fn index(&self, index: Piece) -> &Self::Output {
-        &self.pieces[index as usize]
+        &self.pieces[index]
     }
 }
 
 impl IndexMut<Piece> for Board {
     fn index_mut(&mut self, index: Piece) -> &mut Self::Output {
-        &mut self.pieces[index as usize]
+        &mut self.pieces[index]
     }
 }
 
 impl Index<Colour> for Board {
     type Output = BB;
     fn index(&self, index: Colour) -> &Self::Output {
-        &self.colours[index as usize]
+        &self.colours[index]
     }
 }
 
 impl IndexMut<Colour> for Board {
     fn index_mut(&mut self, index: Colour) -> &mut Self::Output {
-        &mut self.colours[index as usize]
+        &mut self.colours[index]
     }
 }
 
 impl Index<Square> for Board {
     type Output = Option<Piece>;
     fn index(&self, index: Square) -> &Self::Output {
-        &self.mailbox[index as usize]
+        &self.mailbox[index]
     }
 }
 
 impl IndexMut<Square> for Board {
     fn index_mut(&mut self, index: Square) -> &mut Self::Output {
-        &mut self.mailbox[index as usize]
+        &mut self.mailbox[index]
     }
 }
 

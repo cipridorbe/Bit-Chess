@@ -96,17 +96,7 @@ impl Game {
         }
 
         let mut movelist = self.board.generate_movelist(false);
-        let mut i = 0;
-        while i < movelist.length {
-            let mv = movelist[i];
-            if self.board.is_legal(mv, movelist.pinned) {
-                return None;
-            }
-            // have to make and unmake to prevent queen promotion stalemates
-            let unmake = self.board.makemove(mv);
-            self.board.unmakemove(mv, 0, unmake, Some(&mut movelist));
-            i += 1;
-        }
+        if movelist.length > 0 { return None }
         if self.board.in_check() {
             return match self.board.colour {
                 Colour::White => Some(-(1 + self.board.fullmoves as i16)),

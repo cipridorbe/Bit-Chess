@@ -7,9 +7,7 @@ pub struct SearchState {
     pub tt: Arc<TT>,
     pub pawn_table: Arc<PawnTable>,
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
-    pub history: [[MoveScore; 64]; 64],
-    // [prev_pieces][prev_target][piece][target]
-    pub continuation_history: Box<[[[[MoveScore; 64]; 12]; 64]; 12]>,
+    pub history: History,
     pub counter_move: [[Option<Move>; 64]; 64],
     pub max_depth: u8,
     pub node_count: u64,
@@ -28,8 +26,7 @@ impl SearchState {
             tt: Arc::new(TT::new(tt_bits, tt_generation_cutoff)),
             pawn_table: Arc::new(PawnTable::new(pawn_table_bits)),
             killers: [[None; 2]; MAX_PLY as usize],
-            history: [[0; 64]; 64],
-            continuation_history: Box::new([[[[0; 64]; 12]; 64]; 12]),
+            history: History::new(),
             counter_move: [[None; 64]; 64],
             max_depth: 0,
             node_count: 0,
@@ -46,11 +43,7 @@ impl SearchState {
             self.killers[i - 1] = self.killers[i]
         }
         self.killers[self.killers.len() - 1] = [None, None];
-        for i in 0..64 {
-            for j in 0..64 {
-                self.history[i][j] /= 2;
-            }
-        }
+        self.history.new_search();
         self.counter_move = [[None; 64]; 64];
         self.node_count = 0;
         self.stop_search = false;
@@ -62,7 +55,6 @@ impl SearchState {
             pawn_table: Arc::clone(&self.pawn_table),
             killers: self.killers.clone(),
             history: self.history.clone(),
-            continuation_history: self.continuation_history.clone(),
             counter_move: self.counter_move.clone(),
             max_depth: self.max_depth,
             node_count: 0,
@@ -80,28 +72,135 @@ impl SearchState {
             self.killers[ply as usize][1] = self.killers[ply as usize][0];
             self.killers[ply as usize][0] = Some(mv);
         }
-        let bonus = (depth * depth) as i16;
-        let entry = self.history[mv.source_square() as usize][mv.target_square() as usize];
-        self.history[mv.source_square() as usize][mv.target_square() as usize]
-            += bonus - (entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
-        for quiet in tried_quiets {
-            let entry = self.history[quiet.source_square() as usize][quiet.target_square() as usize];
-            self.history[quiet.source_square() as usize][quiet.target_square() as usize]
-                += -bonus - (entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
+        self.history.beta_cutoff(board, mv, depth, tried_quiets);
+    }
+}
+
+type Hist<T> = [[T; 64]; 12];
+
+
+#[derive(Clone)]
+pub struct History {
+    history: Hist<MoveScore>,
+    continuation: Box<Hist<Hist<MoveScore>>>,
+    follow_up: Box<Hist<Hist<MoveScore>>>,
+}
+
+impl History {
+    pub fn new() -> Self {
+        History {
+            history: [[0; 64]; 12],
+            continuation: [[[[0; 64]; 12]; 64]; 12].into(),
+            follow_up: [[[[0; 64]; 12]; 64]; 12].into(),
         }
-        if let Some(prev) = board.move_history.last().copied() {
-            if prev != Move::NULL_MOVE {
-                self.counter_move[prev.source_square() as usize][prev.target_square() as usize] = Some(mv);
-                let prev_piece = board[prev.target_square()].unwrap();
-                let piece = board[mv.source_square()].unwrap();
-                let entry = &mut self.continuation_history[prev_piece as usize][prev.target_square() as usize][piece as usize][mv.target_square() as usize];
-                *entry += bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
-                for quiet in tried_quiets {
-                    let quiet_p = board[quiet.source_square()].unwrap();
-                    let entry = &mut self.continuation_history[prev_piece as usize][prev.target_square() as usize][quiet_p as usize][quiet.target_square() as usize];
-                    *entry += -bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
-                }
+    }
+
+    pub fn new_search(&mut self) {
+        for entry in self.history.iter_mut().flatten() {
+            *entry /= 2;
+        }
+        for entry in self.continuation.iter_mut().flatten().flatten().flatten() {
+            *entry /= 2;
+        }
+        for entry in self.follow_up.iter_mut().flatten().flatten().flatten() {
+            *entry /= 2;
+        }
+    }
+
+    pub fn get(&self, board: &Board, mv: Move) -> MoveScore {
+        let mut bonus: i32 = 0;
+        let piece = board[mv.source_square()].unwrap();
+        let dest = mv.target_square();
+        bonus += self.history[piece][dest] as i32;
+        let len = board.move_history.len();
+        if len == 0 {
+            return bonus as MoveScore;
+        }
+        let (prev_mv, prev_piece) = board.move_history[len - 1];
+        if prev_mv == Move::NULL_MOVE {
+            return bonus as MoveScore;
+        }
+        let prev_piece = prev_piece.unwrap();
+        let prev_dest = prev_mv.target_square();
+        bonus += self.continuation[prev_piece][prev_dest][piece][dest] as i32;
+        if len == 1 {
+            return (bonus / 2) as MoveScore;
+        }
+        let (prev_prev_mv, prev_prev_piece) = board.move_history[len - 2];
+        if prev_prev_mv == Move::NULL_MOVE {
+            return (bonus / 2) as MoveScore;
+        }
+        let prev_prev_piece = prev_prev_piece.unwrap();
+        let prev_prev_dest = prev_prev_mv.target_square();
+        bonus += self.follow_up[prev_prev_piece][prev_prev_dest][piece][dest] as i32;
+
+        (bonus / 3) as MoveScore
+    }
+
+    pub fn beta_cutoff(&mut self, board: &Board, mv: Move, depth: u8, tried_quiets: &[Move]) {
+        let piece = board[mv.source_square()].unwrap();
+        let dest = mv.target_square();
+        let bonus = depth as MoveScore * depth as MoveScore;
+        History::update_entry(&mut self.history[piece][dest], bonus / 4, true);
+
+        let len = board.move_history.len();
+        if len == 0 {
+            for tried_mv in tried_quiets {
+                let tried_piece = board[tried_mv.source_square()].unwrap();
+                let tried_dest = tried_mv.target_square();
+                History::update_entry(&mut self.history[tried_piece][tried_dest], bonus / 4, false);
             }
+            return;
+        }
+        let (prev_mv, prev_piece) = board.move_history[len - 1];
+        if prev_mv == Move::NULL_MOVE {
+            for tried_mv in tried_quiets {
+                let tried_piece = board[tried_mv.source_square()].unwrap();
+                let tried_dest = tried_mv.target_square();
+                History::update_entry(&mut self.history[tried_piece][tried_dest], bonus / 4, false);
+            }
+            return;
+        }
+        let prev_piece = prev_piece.unwrap();
+        let prev_dest = prev_mv.target_square();
+        History::update_entry(&mut self.continuation[prev_piece][prev_dest][piece][dest], bonus, true);
+        if len == 1 {
+            for tried_mv in tried_quiets {
+                let tried_piece = board[tried_mv.source_square()].unwrap();
+                let tried_dest = tried_mv.target_square();
+                History::update_entry(&mut self.history[tried_piece][tried_dest], bonus / 4, false);
+                History::update_entry(&mut self.continuation[prev_piece][prev_dest][tried_piece][tried_dest], bonus, false);
+            }
+            return;
+        }
+        let (prev_prev_mv, prev_prev_piece) = board.move_history[len - 2];
+        if prev_prev_mv == Move::NULL_MOVE {
+            for tried_mv in tried_quiets {
+                let tried_piece = board[tried_mv.source_square()].unwrap();
+                let tried_dest = tried_mv.target_square();
+                History::update_entry(&mut self.history[tried_piece][tried_dest], bonus / 4, false);
+                History::update_entry(&mut self.continuation[prev_piece][prev_dest][tried_piece][tried_dest], bonus, false);
+            }
+            return;
+        }
+        let prev_prev_piece = prev_prev_piece.unwrap();
+        let prev_prev_dest = prev_prev_mv.target_square();
+        History::update_entry(&mut self.follow_up[prev_prev_piece][prev_prev_dest][piece][dest], bonus / 2, true);
+        for tried_mv in tried_quiets {
+            let tried_piece = board[tried_mv.source_square()].unwrap();
+            let tried_dest = tried_mv.target_square();
+            History::update_entry(&mut self.history[tried_piece][tried_dest], bonus / 4, false);
+            History::update_entry(&mut self.continuation[prev_piece][prev_dest][tried_piece][tried_dest], bonus, false);
+            History::update_entry(&mut self.follow_up[prev_prev_piece][prev_prev_dest][tried_piece][tried_dest], bonus / 2, false);
+        }
+    }
+
+    #[inline]
+    fn update_entry(entry: &mut MoveScore, bonus: MoveScore, positive: bool) {
+        if positive {
+            *entry += bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
+        } else {
+            *entry += -bonus - (*entry as i32 * bonus as i32 / MAX_HISTORY_VALUE as i32) as i16;
         }
     }
 }

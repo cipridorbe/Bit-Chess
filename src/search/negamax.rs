@@ -2,7 +2,7 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}
 
 use once_cell::sync::Lazy;
 
-use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval, relative_eval}, movegen::r#move::{Flag, Move, MoveList, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
+use crate::{eval::{Eval, INF, MATE, MATE_CUTOFF, partial_relative_eval, relative_eval}, movegen::r#move::{Flag, MAX_MOVES, Move, MoveList, REGULAR_QUIET_SCORE}, repr::{board::Board, piece::Piece}, search::{MAX_PLY, NUM_THREADS, state::SearchState, tt::{TTEntry, TTFlag, adjust_retrieve_eval}}};
 
 pub const TIMEOUT_MOD: u64 = 1 << 13;
 
@@ -170,12 +170,11 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         tt_move = negamax(stop_flag, board, state, new_depth, ply, alpha, beta, false).0;
     }
 
-    let mut tried_quiets = [Move::NULL_MOVE; 218];
+    let mut tried_quiets = [Move::NULL_MOVE; MAX_MOVES];
     let mut tried_quiets_idx = 0;
     let mut moved = false;
     let mut best_move = None;
     let mut best_score = -INF;
-    let mut add_proms = false;
 
     let mut skip_quiets = false;
 
@@ -194,13 +193,8 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     let see_pruning = ply > 0 && !is_pv && !in_check && depth == 1;
 
     // Try to create a beta cutoff by making the tt move first
-    if tt_move.is_some() && !board.is_legal_partial(tt_move.unwrap()) {
-        tt_move = None;
-    }
-
     let mut movelist = MoveList::new();
-    let mut scores = [0; 218];
-    let mut singularity_searched = 0;
+    let mut scores = [0; MAX_MOVES];
 
     if let Some(tt_mv) = tt_move {
         let unmake_info = board.makemove(tt_mv);
@@ -208,7 +202,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         let tt_score = if board.is_rule_draw() { 0 } else {
             -negamax(stop_flag, board, state, full_search_depth, ply + 1, -beta, -alpha, true).1
         };
-        add_proms = board.unmakemove(tt_mv, tt_score, unmake_info, None);
+        board.unmakemove(tt_mv, unmake_info);
         if tt_score > alpha {
             alpha = tt_score;
         } else {
@@ -235,33 +229,21 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             movelist = board.generate_movelist(false);
             scores = movelist.score(board, state, tt_move, ply);
             movelist.sort(&mut scores);
-            if add_proms {
-                add_proms = false;
-                let prom = tt_mv;
-                if prom.is_capture() {
-                    movelist.add(Move::new(Flag::ROOKPROMCAP, prom.target_square(), prom.source_square()));
-                    movelist.add(Move::new(Flag::BISHOPPROMCAP, prom.target_square(), prom.source_square()));
-                } else {
-                    movelist.add(Move::new(Flag::ROOKPROM, prom.target_square(), prom.source_square()));
-                    movelist.add(Move::new(Flag::BISHOPPROM, prom.target_square(), prom.source_square()));
-                }
-            }
-            let singularity_beta = if depth >= 12 {
-                tt_score - 33 - 20 * is_pv as Eval
-            } else {
-                tt_score - 40 - 30 * is_pv as Eval
-            };
+            movelist.maybe_add_proms(tt_score, tt_move, 0);
+            let singularity_beta = 
+                if depth >= 12 { tt_score - 33 - 20 * is_pv as Eval }
+                else { tt_score - 40 - 30 * is_pv as Eval };
             let mut fail_high = false;
             let mut i = 1;
             while i < movelist.length {
                 let mv = movelist[i];
-                singularity_searched = i;
                 i += 1;
                 let unmake = board.makemove(mv);
                 let score = if board.is_rule_draw() { 0 } else {
                     -negamax(stop_flag, board, state, depth / 2, ply + 1, -singularity_beta - 1, -singularity_beta, true).1
                 };
-                board.unmakemove(mv, score, unmake, Some(&mut movelist));
+                board.unmakemove(mv, unmake);
+                movelist.maybe_add_proms(score, Some(mv), i - 1);
                 if score >= singularity_beta {
                     fail_high = true;
                     movelist.shift(&mut scores, i - 1, 1);
@@ -280,7 +262,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
                     let score = if board.is_rule_draw() { 0 } else {
                         -negamax(stop_flag, board, state, singularity_depth, ply + 1, -beta, -original_alpha, true).1
                     };
-                    board.unmakemove(tt_mv, 0, unmake, None);
+                    board.unmakemove(tt_mv, unmake);
                     score
                 };
                 let flag = if score >= beta { TTFlag::LowerBound }
@@ -298,15 +280,8 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         movelist = board.generate_movelist(false);
         scores = movelist.score(board, state, tt_move, ply);
         movelist.sort(&mut scores);
-    } else if add_proms {
-        let prom = tt_move.unwrap();
-        if prom.is_capture() {
-            movelist.add(Move::new(Flag::ROOKPROMCAP, prom.target_square(), prom.source_square()));
-            movelist.add(Move::new(Flag::BISHOPPROMCAP, prom.target_square(), prom.source_square()));
-        } else {
-            movelist.add(Move::new(Flag::ROOKPROM, prom.target_square(), prom.source_square()));
-            movelist.add(Move::new(Flag::BISHOPPROM, prom.target_square(), prom.source_square()));
-        }
+    } else {
+        movelist.maybe_add_proms(best_score, tt_move, 0);
     }
 
     let mut early_exit = false;
@@ -318,9 +293,6 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         let mv = movelist[i];
         let mv_prescore = scores[i];
         i += 1;
-        if !board.is_legal(mv, movelist.pinned) {
-            continue;
-        }
         if moved && skip_quiets && mv_prescore <= REGULAR_QUIET_SCORE && best_score > -MATE_CUTOFF{
             early_exit = true;
             break;
@@ -348,7 +320,8 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             }
         };
         moved = true;
-        board.unmakemove(mv, score, unmake_info, if i > singularity_searched { Some(&mut movelist) } else { None });
+        board.unmakemove(mv, unmake_info);
+        movelist.maybe_add_proms(score, Some(mv), i - 1);
         if score > best_score {
             best_score = score;
             best_move = Some(mv);
@@ -442,15 +415,13 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
                 continue;
             }
         }
-        if !board.is_legal(mv, movelist.pinned) {
-            continue;
-        }
         let unmake_info = board.makemove(mv);
         moved = true;
         let score = if board.is_rule_draw() { 0 } else {
             -quiescence(stop_flag, board, state, ply + 1, -beta, -alpha)
         };
-        board.unmakemove(mv, score, unmake_info, Some(&mut movelist));
+        board.unmakemove(mv, unmake_info);
+        movelist.maybe_add_proms(score, Some(mv), i - 1);
         best_score = Eval::max(best_score, score);
         alpha = Eval::max(alpha, score);
         if alpha >= beta {
@@ -462,6 +433,34 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
         return -(MATE - ply as Eval);
     }
     best_score
+}
+
+pub fn simple_search(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut SearchState, depth: u8, ply: u8, beta: Eval, null_move_allowed: bool, movelist: &mut MoveList, start: usize, end: usize, fail_highs: u8) -> (Option<usize>, Eval) {
+    let mut best_score = -INF;
+    let mut best_move = None;
+    let mut failed_highs = 0;
+    let mut i = start;
+    while i < movelist.length.min(end) {
+        let mv = movelist[i];
+        i += 1;
+        let unmake = board.makemove(mv);
+        let score = if board.is_rule_draw() { 0 } else {
+            -negamax(stop_flag, board, state, depth, ply + 1, -beta, -beta + 1, true).1
+        };
+        board.unmakemove(mv, unmake);
+        movelist.maybe_add_proms(score, Some(mv), i - 1);
+        if score >= best_score {
+            best_score = score;
+            best_move = Some(i);
+        }
+        if score >= beta {
+            failed_highs += 1;
+            if failed_highs >= fail_highs {
+                break;
+            }
+        }
+    }
+    (best_move, best_score)
 }
 
 pub static LMR_TABLE: Lazy<[[u8; 64]; 64]> = Lazy::new(|| {
