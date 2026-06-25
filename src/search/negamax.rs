@@ -134,7 +134,8 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
 
     // TT lookup. Store the best move and exit early if possible.
     let mut tt_move = None;
-    if let Some(entry) = state.tt.find(board.state.hash) {
+    let (tt_entry, second_best_move) = state.find_tt(board.state.hash);
+    if let Some(entry) = tt_entry {
         tt_move = entry.best_move;
         let eval = adjust_retrieve_eval(entry.eval, ply);
         if entry.depth >= depth && board.state.repetitions <= 1 && board.halfmove_clock < 90 && !is_pv {
@@ -149,6 +150,10 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         }
     }
 
+    alpha = alpha.max(-(MATE - ply as Eval));
+    beta  = beta.min(MATE - (ply + 1) as Eval);
+    if alpha >= beta { return (None, alpha); }
+
     let original_alpha = alpha;
 
     // Try to create a beta cutoff with a null move
@@ -158,7 +163,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         board.null_unmakemove(null_unmake);
         if score >= beta {
             let tt_entry = TTEntry::new(board.state.hash, score, TTFlag::LowerBound, None, depth, state.tt.generation());
-            state.tt.insert(tt_entry, ply);
+            state.insert_tt(tt_entry, ply);
             return (None, score)
         }
     }
@@ -227,7 +232,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
         // singularity extensions: if there is only one good move, search deeper
         if depth >= 99 && tt_score.abs() >= MATE_CUTOFF {
             movelist = board.generate_movelist(false);
-            scores = movelist.score(board, state, tt_move, ply);
+            scores = movelist.score(board, state, tt_move, second_best_move, ply);
             movelist.sort(&mut scores);
             movelist.maybe_add_proms(tt_score, tt_move, 0);
             let singularity_beta = 
@@ -269,7 +274,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
                     else if score <= original_alpha { TTFlag::UpperBound }
                     else { TTFlag::Exact };
                 let tt_entry = TTEntry::new(board.state.hash, score, flag, Some(tt_mv), singularity_depth, state.tt.generation());
-                state.tt.insert(tt_entry, ply);
+                state.insert_tt(tt_entry, ply);
                 return (Some(tt_mv), score);
             }
         }
@@ -278,7 +283,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
     // If we haven't cut off, we have to start exploring more moves
     if movelist.length == 0 {
         movelist = board.generate_movelist(false);
-        scores = movelist.score(board, state, tt_move, ply);
+        scores = movelist.score(board, state, tt_move, second_best_move, ply);
         movelist.sort(&mut scores);
     } else {
         movelist.maybe_add_proms(best_score, tt_move, 0);
@@ -349,7 +354,7 @@ pub fn negamax(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Searc
             else if best_score <= original_alpha { TTFlag::UpperBound }
             else { TTFlag::Exact };
         let tt_entry = TTEntry::new(board.state.hash, best_score, tt_flag, best_move, depth, state.tt.generation());
-        state.tt.insert(tt_entry, ply);
+        state.insert_tt(tt_entry, ply);
     }
 
     return (best_move, best_score);
@@ -391,7 +396,7 @@ pub fn quiescence(stop_flag: &Arc<AtomicBool>, board: &mut Board, state: &mut Se
     let mut movelist = board.generate_movelist(!in_check);
     // TODO: try different scoring methods for quiescence search
     let mut scores = if in_check {
-        movelist.score(board, &state, None, ply)
+        movelist.score(board, &state, None, None, ply)
     } else {
         movelist.quiescense_score(board)
     };

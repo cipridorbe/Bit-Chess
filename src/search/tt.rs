@@ -35,19 +35,38 @@ impl TTEntry {
     }
 }
 
-pub struct TT {
-    table: Vec<UnsafeCell<TTEntry>>,
+pub trait Select {
+    type Out;
+    fn empty() -> Self::Out;
+    #[inline]
+    fn get<'a>(entry: &'a Self::Out) -> &'a TTEntry;
+}
+struct If<const shared: bool>();
+impl Select for If<true> {
+    type Out = UnsafeCell<TTEntry>;
+    fn empty() -> Self::Out { UnsafeCell::new(TTEntry::empty()) }
+    fn get<'a>(entry: &'a Self::Out) -> &'a TTEntry { unsafe { &*entry.get() }}
+}
+impl Select for If<false> {
+    type Out = TTEntry;
+    fn empty() -> Self::Out { TTEntry::empty() }
+    fn get<'a>(entry: &'a Self::Out) -> &'a TTEntry { entry }
+}
+
+pub struct TT<const shared: bool> where If<shared>: Select {
+    table: Vec<<If<shared> as Select>::Out>,
     mask: u64,
     generation: u8,
     generation_cutoff: u8,
 }
 
-impl TT {
+impl<const shared: bool> TT<shared> where If<shared>: Select {
+
     /// new table of size 2^bits entries
     pub fn new(bits: u8, generation_cutoff: u8) -> Self {
         let mut table = Vec::with_capacity(1 << bits);
         for _ in 0..(1 << bits) {
-            table.push(UnsafeCell::new(TTEntry::empty()));
+            table.push(<If<shared> as Select>::empty());
         }
         TT {
             table: table,
@@ -59,7 +78,7 @@ impl TT {
 
     pub fn find(&self, hash: Hash) -> Option<&TTEntry> {
         let idx = hash.0 & self.mask;
-        let entry = unsafe { &*self.table[idx as usize].get() };
+        let entry = <If<shared> as Select>::get(&self.table[idx as usize]);
         if entry.hash == hash {
             Some(entry)
         } else {
@@ -67,6 +86,12 @@ impl TT {
         }
     }
 
+    pub fn generation(&self) -> u8 { self.generation }
+
+    pub fn new_search(&mut self) { self.generation += 1 }
+}
+
+impl TT<true> {
     pub fn insert(&self, mut entry: TTEntry, ply: u8) {
         let idx = entry.hash.0 & self.mask;
         let current_entry = unsafe { &mut *self.table[idx as usize].get() };
@@ -78,25 +103,30 @@ impl TT {
             entry.hash = Hash(0);
             *current_entry = entry;
             current_entry.hash = hash;
-            // let p = current_entry as *mut TTEntry;
-            // unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!((*p).hash), Hash(0)) };
-            // current_entry.eval = entry.eval;
-            // current_entry.flag = entry.flag;
-            // current_entry.best_move = entry.best_move;
-            // current_entry.depth = entry.depth;
-            // current_entry.generation = entry.generation;
-            // std::sync::atomic::fence(std::sync::atomic::Ordering::Release);
-            // unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!((*p).hash), entry.hash) };
         }
     }
-
-    pub fn generation(&self) -> u8 { self.generation }
-
-    pub fn new_search(&mut self) { self.generation += 1 }
 }
 
-unsafe impl Send for TT {}
-unsafe impl Sync for TT {}
+impl TT<false> {
+    pub fn insert(&mut self, mut entry: TTEntry, ply: u8) {
+        let idx = entry.hash.0 & self.mask;
+        entry.eval = adjust_insert_eval(entry.eval, ply);
+        self.table[idx as usize] = entry;
+    }
+}
+
+impl Clone for TT<false> {
+    fn clone(&self) -> Self {
+        Self {
+            table: self.table.clone(),
+            mask: self.mask,
+            generation: self.generation,
+            generation_cutoff: self.generation_cutoff
+        }
+    }
+}
+unsafe impl<const shared: bool> Send for TT<shared> where If<shared> : Select {}
+unsafe impl<const shared: bool> Sync for TT<shared> where If<shared> : Select {}
 
 fn adjust_insert_eval(eval: Eval, ply: u8) -> Eval {
     if eval.abs() < MATE_CUTOFF {

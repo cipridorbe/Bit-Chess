@@ -467,7 +467,7 @@ pub(crate) mod tests {
         let board = Board::from_fen("r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4");
         let state = SearchState::new(16, 2, 14);
         let movelist = board.generate_movelist(false);
-        let mut scores = movelist.score(&board, &state, None, 0);
+        let mut scores = movelist.score(&board, &state, None, None, 0);
         let mut movelist = movelist;
         movelist.sort(&mut scores);
         for i in 1..movelist.length {

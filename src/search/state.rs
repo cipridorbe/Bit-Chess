@@ -1,10 +1,11 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, repr::board::Board, search::{MAX_PLY, tt::TT}};
+use crate::{eval::pawnking::PawnTable, movegen::r#move::{MAX_HISTORY_VALUE, Move, MoveScore}, repr::{board::Board, hash::Hash}, search::{MAX_PLY, tt::{TT, TTEntry}}};
 
 #[derive(Clone)]
 pub struct SearchState {
-    pub tt: Arc<TT>,
+    pub tt: Arc<TT<true>>,
+    pub local_tt: TT<false>,
     pub pawn_table: Arc<PawnTable>,
     pub killers: [[Option<Move>; 2]; MAX_PLY as usize],
     pub history: History,
@@ -24,6 +25,7 @@ impl SearchState {
     pub fn new(tt_bits: u8, tt_generation_cutoff: u8, pawn_table_bits: u8) -> Self {
         SearchState {
             tt: Arc::new(TT::new(tt_bits, tt_generation_cutoff)),
+            local_tt: TT::new(tt_bits - 3, tt_generation_cutoff),
             pawn_table: Arc::new(PawnTable::new(pawn_table_bits)),
             killers: [[None; 2]; MAX_PLY as usize],
             history: History::new(),
@@ -39,6 +41,7 @@ impl SearchState {
     pub fn new_search(&mut self) {
         let tt = Arc::get_mut(&mut self.tt).expect("new_search() called with multiple active TTs");
         tt.new_search();
+        self.local_tt.new_search();
         for i in 1..self.killers.len() {
             self.killers[i - 1] = self.killers[i]
         }
@@ -52,6 +55,7 @@ impl SearchState {
     pub fn new_helper_thread(&self) -> Self {
         SearchState {
             tt: Arc::clone(&self.tt),
+            local_tt: self.local_tt.clone(),
             pawn_table: Arc::clone(&self.pawn_table),
             killers: self.killers.clone(),
             history: self.history.clone(),
@@ -73,6 +77,24 @@ impl SearchState {
             self.killers[ply as usize][0] = Some(mv);
         }
         self.history.beta_cutoff(board, mv, depth, tried_quiets);
+    }
+
+    // returns the better tt entry and the other tt's best move
+    pub fn find_tt(&self, hash: Hash) -> (Option<&TTEntry>, Option<Move>) {
+        let shared = self.tt.find(hash);
+        let local = self.local_tt.find(hash);
+        let depth_shared = shared.map(|entry| entry.depth).unwrap_or(0);
+        let depth_local = local.map(|entry| entry.depth).unwrap_or(0);
+        if depth_shared >= depth_local {
+            (shared, local.map(|entry| entry.best_move).unwrap_or(None))
+        } else {
+            (local, shared.map(|entry| entry.best_move).unwrap_or(None))
+        }
+    }
+
+    pub fn insert_tt(&mut self, entry: TTEntry, ply: u8) {
+        self.tt.insert(entry.clone(), ply);
+        self.local_tt.insert(entry, ply);
     }
 }
 

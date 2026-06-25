@@ -190,8 +190,9 @@ impl Move {
         self.0.get() & (1 << Move::PROMOTION_OFFSET) != 0
     }
 
-    pub fn score(self, board: &Board, tt_move: Option<Move>, killers: &[Option<Move>; 2], history: &History, counter_move: Option<Move>) -> MoveScore {
+    pub fn score(self, board: &Board, tt_move: Option<Move>, second_best_move: Option<Move>, killers: &[Option<Move>; 2], history: &History, counter_move: Option<Move>) -> MoveScore {
         if Some(self) == tt_move { return TTSCORE; }
+        if Some(self) == second_best_move { return TTSCORE - 1; }
         if Some(self) == killers[0] { return KILLERS_SCORE[0]; }
         if Some(self) == killers[1] { return KILLERS_SCORE[1]; }
         // if Some(self) == counter_move { return COUNTERMOVE_SCORE; }
@@ -258,7 +259,7 @@ impl MoveList {
         }
     }
 
-    pub fn score(&self, board: &Board, search_state: &SearchState, tt_move: Option<Move>, ply: u8) -> [Eval; MAX_MOVES] {
+    pub fn score(&self, board: &Board, search_state: &SearchState, tt_move: Option<Move>, second_best_move: Option<Move>, ply: u8) -> [Eval; MAX_MOVES] {
         let mut out = [0; MAX_MOVES];
         let mut i = 0;
         let killers = &search_state.killers[ply as usize];
@@ -266,7 +267,7 @@ impl MoveList {
             search_state.counter_move[prev.0.source_square() as usize][prev.0.target_square() as usize]
         );
         while i < self.length {
-            out[i] = self[i].score(board, tt_move, killers, &search_state.history, counter_move);
+            out[i] = self[i].score(board, tt_move, second_best_move, killers, &search_state.history, counter_move);
             i += 1;
         }
         out
