@@ -223,7 +223,8 @@ pub struct MoveList {
     pub explored: isize,
     captures: usize,
     pub pinned: BB,
-    pub queen_proms: u8
+    pub queen_proms: u8,
+    pub enpassants: u8,
 }
 
 impl MoveList {
@@ -235,8 +236,13 @@ impl MoveList {
             explored: 0,
             captures: 0,
             pinned: BB::new(0),
-            queen_proms: 0
+            queen_proms: 0,
+            enpassants: 0
         }
+    }
+
+    pub fn num_total_moves(&self) -> usize {
+        self.length + self.queen_proms as usize * 2 + self.enpassants as usize
     }
 
     /// Adds a move to the movelist

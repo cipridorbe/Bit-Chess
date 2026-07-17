@@ -4,3 +4,4 @@ pub mod movegen;
 pub mod repr;
 pub mod search;
 pub mod util;
+pub mod egtb;

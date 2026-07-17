@@ -34,12 +34,12 @@ impl Square {
     }
 
     /// Converts the given u8 to a Square
-    pub fn from_u8(square: u8) -> Self {
+    pub const fn from_u8(square: u8) -> Self {
         test_assert!(square < 64);
         unsafe { std::mem::transmute(square) }
     }
 
-    pub fn from_rank_file(rank: u8, file: u8) -> Self {
+    pub const fn from_rank_file(rank: u8, file: u8) -> Self {
         test_assert!(rank < 8 && file < 8);
         Square::from_u8(rank * 8 + file)
     }
@@ -50,17 +50,17 @@ impl Square {
     }
 
     /// Returns the 0-indexed rank
-    pub fn rank(self) -> u8 {
+    pub const fn rank(self) -> u8 {
         self as u8 / 8
     }
 
     /// Returns the 0-indexed file, where file A is the 0'th file
-    pub fn file(self) -> u8 {
+    pub const fn file(self) -> u8 {
         self as u8 % 8
     }
 
     /// Returns the rank and file, 0-indexed
-    pub fn rank_file(self) -> (u8, u8) {
+    pub const fn rank_file(self) -> (u8, u8) {
         (self.rank(), self.file())
     }
 

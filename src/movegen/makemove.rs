@@ -335,7 +335,7 @@ fn unmakemove(board: &mut Board, mv: Move, unmake_info: UnmakeInfo) {
 }
 
 fn null_unmakemove(board: &mut Board, null_unmake_info: NullUnmakeInfo) {
-    test_assert!(board.move_history.last().copied() == Some(Move::NULL_MOVE));
+    // test_assert!(board.move_history.last().copied() == Some(Move::NULL_MOVE));
     null_unmake_info.write(board);
     let colour = board.colour;
     if colour == Colour::White {

@@ -1,6 +1,6 @@
 use crate::{eval::Eval, movegen::r#move::MoveScore, repr::colour::Colour};
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Piece {
     WhitePawn,
     WhiteKnight,
@@ -133,6 +133,42 @@ impl Piece {
         match colour {
             Colour::White => Piece::WhiteKing,
             Colour::Black => Piece::BlackKing
+        }
+    }
+
+    pub fn colour_swap(self) -> Self {
+        match self {
+            Piece::WhitePawn => Piece::BlackPawn,
+            Piece::WhiteKnight => Piece::BlackKnight,
+            Piece::WhiteBishop => Piece::BlackBishop,
+            Piece::WhiteRook => Piece::BlackRook,
+            Piece::WhiteQueen => Piece::BlackQueen,
+            Piece::WhiteKing => Piece::BlackKing,
+
+            Piece::BlackPawn => Piece::WhitePawn,
+            Piece::BlackKnight => Piece::WhiteKnight,
+            Piece::BlackBishop => Piece::WhiteBishop,
+            Piece::BlackRook => Piece::WhiteRook,
+            Piece::BlackQueen => Piece::WhiteQueen,
+            Piece::BlackKing => Piece::WhiteKing,
+        }
+    }
+
+    pub fn to_white(self) -> Self {
+        match self {
+            Piece::WhitePawn => Piece::WhitePawn,
+            Piece::WhiteKnight => Piece::WhiteKnight,
+            Piece::WhiteBishop => Piece::WhiteBishop,
+            Piece::WhiteRook => Piece::WhiteRook,
+            Piece::WhiteQueen => Piece::WhiteQueen,
+            Piece::WhiteKing => Piece::WhiteKing,
+
+            Piece::BlackPawn => Piece::WhitePawn,
+            Piece::BlackKnight => Piece::WhiteKnight,
+            Piece::BlackBishop => Piece::WhiteBishop,
+            Piece::BlackRook => Piece::WhiteRook,
+            Piece::BlackQueen => Piece::WhiteQueen,
+            Piece::BlackKing => Piece::WhiteKing,
         }
     }
 
