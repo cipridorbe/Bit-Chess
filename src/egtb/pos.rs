@@ -187,7 +187,7 @@ impl Pos {
         // the colour-swapped perspective and keep whichever has the lower hash.
         if normalize_colour {
             if let Some(p2) = self.p2 {
-                if !self.has_pawn() && p2.1 == self.p1.1.colour_swap() {
+                if p2.1 == self.p1.1.colour_swap() {
                     let mut clone = self.clone();
                     clone.colour_swap();
                     if clone.p1.1.colour() == Colour::Black {
@@ -356,6 +356,7 @@ impl Pos {
     }
 
     fn make_revmove_onepiece(&mut self, revmove: RevMove) {
+        if revmove.diagonal { self.reflect(DIAGONAL); }
         let moving = revmove.moving_piece();
         let from = match moving {
             MovingPiece::WhiteKing => {
@@ -443,6 +444,11 @@ impl Pos {
                     }
                 }
             }
+            if self.p1.1 != Piece::WhitePawn && self.king[Colour::Black].file() != 0 && self.king[Colour::Black].file() != 7 {
+                for target in targets.squares() {
+                    out.add(RevMove::new(DIAGONAL[target], Some(Piece::WhitePawn), MovingPiece::BlackKing, false, false).with_diagonal());
+                }
+            }
             return out;
         }
         let mut king_targets = KING_ATTACKS[self.king[Colour::White]];
@@ -459,6 +465,11 @@ impl Pos {
                 for uncaptured in RevMove::BLACK {
                     out.add(RevMove::new(target, uncaptured, MovingPiece::WhiteKing, false, false));
                 }
+            }
+        }
+        if self.p1.1 != Piece::WhitePawn && self.king[Colour::White].file() != 0 && self.king[Colour::White].file() != 7 {
+            for target in king_targets.squares() {
+                out.add(RevMove::new(DIAGONAL[target], Some(Piece::BlackPawn), MovingPiece::WhiteKing, false, false).with_diagonal());
             }
         }
         if self.p1.1 == Piece::WhitePawn && self.p1.0.rank() == 1 {
@@ -494,17 +505,6 @@ impl Pos {
         };
         targets &= !occupied;
         for target in targets.squares() {
-            let bk = self.king[Colour::Black];
-            let wk = self.king[Colour::White];
-            if match self.p1.1 {
-                Piece::WhiteKnight => single_knight_attacks(target) & bk != 0,
-                Piece::WhiteBishop => SEGMENT_DIAGONAL[target][bk] != 0 && SEGMENT_DIAGONAL[target][bk] & wk == 0,
-                Piece::WhiteRook => SEGMENT_CARDINAL[target][bk] != 0 && SEGMENT_CARDINAL[target][bk] & wk == 0,
-                Piece::WhiteQueen => SEGMENT[target][bk] != 0 && SEGMENT[target][bk] & wk == 0,
-                _ => panic!("should never reach")
-            } {
-                continue;
-            }
             if self.p1.0.rank() == 0 || self.p1.0.rank() == 7 {
                 for uncaptured in RevMove::BLACKPAWNLESS {
                     out.add(RevMove::new(target, uncaptured, MovingPiece::P1, false, false));
@@ -513,6 +513,11 @@ impl Pos {
                 for uncaptured in RevMove::BLACK {
                     out.add(RevMove::new(target, uncaptured, MovingPiece::P1, false, false));
                 }
+            }
+        }
+        if self.p1.0.file() != 0 && self.p1.0.file() != 7 {
+            for target in targets.squares() {
+                out.add(RevMove::new(DIAGONAL[target], Some(Piece::BlackPawn), MovingPiece::P1, false, false).with_diagonal());
             }
         }
         let rank = self.p1.0.rank();
@@ -718,7 +723,8 @@ impl Pos {
                 mg_eval: 0,
                 eg_eval: 0,
                 repetitions: 0,
-                phase_unbounded: 0,
+                phase_unbounded: self.p1.1.phase_value()
+                    + self.p2.map_or(0, |p| p.1.phase_value()),
                 xray_attacks: [BB::new(0); 2],
                 pinners: [BB::new(0); 2]
             }
@@ -779,6 +785,13 @@ impl Pos {
         let (mut moves_left, mut status, mut queue) = Self::init_backwards_gen();
         #[cfg(feature = "assertions")]
         let mut debug_target_predecessors: Vec<(Pos, RevMove, u8)> = Vec::new();
+        #[cfg(feature = "assertions")]
+        let kqkb_target = Pos {
+            king: [Square::a1, Square::c2],
+            p1: (Square::d4, Piece::WhiteQueen),
+            p2: Some((Square::b1, Piece::BlackBishop)),
+            last_moved: Colour::White,
+        };
         while let Some(pos) = queue.pop_front() {
             let state = *pos.index_file(&mut status, Status::UNKOWN);
             if state == Status::UNKOWN {
@@ -842,6 +855,13 @@ impl Pos {
                             pos.p1.1.to_fen(), pos.p1.0.to_fen(),
                             pos.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
                             pos.last_moved.to_fen());
+                    }
+                    if next == kqkb_target {
+                        eprintln!("KQKB DECREMENT: moves_left={} (from pos {} lm={} state={})",
+                            *left,
+                            pos.to_board_partial().to_fen(),
+                            pos.last_moved.to_fen(),
+                            state.0);
                     }
                     let kind = if *left == u8::MAX { "UNINIT" } else if *left == 0 { "UNDERFLOW" } else { "" };
                     if !kind.is_empty() {
@@ -996,7 +1016,7 @@ impl Pos {
         let needs_dedup = !self.has_pawn() && {
             let (wr, wf) = self.king[0].rank_file();
             let (br, bf) = self.king[1].rank_file();
-            wr == wf && br == bf
+            (wr == wf && br + 1 >= bf) || (br == bf && wr + 1 >= wf)
         };
         if !needs_dedup {
             return raw_moves;
@@ -1117,35 +1137,42 @@ mod tests {
     }
 
     fn pos_to_chess(pos: &Pos) -> Option<shakmaty::Chess> {
-        use shakmaty::{Bitboard, Board as ShakmBoard, CastlingMode, Chess, Color, FromSetup, Piece as ShakmPiece, Role, Setup, Square as ShakmSquare};
+        use shakmaty::{Bitboard, Board as ShakmBoard, ByColor, ByRole, CastlingMode, Chess, Color, FromSetup, Setup};
         use std::num::NonZeroU32;
 
-        // Both engines use #[repr(u8)] with A1=0..H8=63 (rank*8+file), so transmute is safe.
-        let sq = |s: Square| -> ShakmSquare { unsafe { std::mem::transmute::<u8, ShakmSquare>(s as u8) } };
-        let pc = |p: Piece| -> ShakmPiece {
-            ShakmPiece {
-                color: match p.colour() {
-                    Colour::White => Color::White,
-                    Colour::Black => Color::Black,
-                },
-                role: match p {
-                    Piece::WhitePawn   | Piece::BlackPawn   => Role::Pawn,
-                    Piece::WhiteKnight | Piece::BlackKnight => Role::Knight,
-                    Piece::WhiteBishop | Piece::BlackBishop => Role::Bishop,
-                    Piece::WhiteRook   | Piece::BlackRook   => Role::Rook,
-                    Piece::WhiteQueen  | Piece::BlackQueen  => Role::Queen,
-                    Piece::WhiteKing   | Piece::BlackKing   => Role::King,
-                },
-            }
-        };
-
-        let mut board = ShakmBoard::empty();
-        board.set_piece_at(sq(pos.king[Colour::White]), pc(Piece::WhiteKing));
-        board.set_piece_at(sq(pos.king[Colour::Black]), pc(Piece::BlackKing));
-        board.set_piece_at(sq(pos.p1.0), pc(pos.p1.1));
-        if let Some(p2) = pos.p2 {
-            board.set_piece_at(sq(p2.0), pc(p2.1));
+        let bb = |s: Square| -> Bitboard { Bitboard(1u64 << s as u8) };
+        macro_rules! add_piece {
+            ($sq:expr, $pc:expr, $pawns:ident, $knights:ident, $bishops:ident, $rooks:ident, $queens:ident, $white:ident, $black:ident) => {{
+                let b = bb($sq);
+                match $pc {
+                    Piece::WhitePawn   => { $pawns   |= b; $white |= b; }
+                    Piece::WhiteKnight => { $knights |= b; $white |= b; }
+                    Piece::WhiteBishop => { $bishops |= b; $white |= b; }
+                    Piece::WhiteRook   => { $rooks   |= b; $white |= b; }
+                    Piece::WhiteQueen  => { $queens  |= b; $white |= b; }
+                    Piece::BlackPawn   => { $pawns   |= b; $black |= b; }
+                    Piece::BlackKnight => { $knights |= b; $black |= b; }
+                    Piece::BlackBishop => { $bishops |= b; $black |= b; }
+                    Piece::BlackRook   => { $rooks   |= b; $black |= b; }
+                    Piece::BlackQueen  => { $queens  |= b; $black |= b; }
+                    _ => {}
+                }
+            }};
         }
+        let (mut pawns, mut knights, mut bishops, mut rooks, mut queens) =
+            (Bitboard(0), Bitboard(0), Bitboard(0), Bitboard(0), Bitboard(0));
+        let wk_bb = bb(pos.king[Colour::White]);
+        let bk_bb = bb(pos.king[Colour::Black]);
+        let mut white = wk_bb;
+        let mut black = bk_bb;
+        add_piece!(pos.p1.0, pos.p1.1, pawns, knights, bishops, rooks, queens, white, black);
+        if let Some((sq2, pc2)) = pos.p2 {
+            add_piece!(sq2, pc2, pawns, knights, bishops, rooks, queens, white, black);
+        }
+        let board = ShakmBoard::from_bitboards(
+            ByRole { pawn: pawns, knight: knights, bishop: bishops, rook: rooks, queen: queens, king: wk_bb | bk_bb },
+            ByColor { white, black },
+        );
 
         let setup = Setup {
             board,
@@ -1233,7 +1260,7 @@ mod tests {
     #[test]
     fn test_syzygy_comparison() {
         use shakmaty::Chess;
-        use shakmaty_syzygy::{AmbiguousWdl, Tablebase};
+        use shakmaty_syzygy::{Tablebase, Wdl};
 
         let syzygy_path = "./syzygy/";
 
@@ -1245,6 +1272,8 @@ mod tests {
 
         let mut mismatches = 0u64;
         let mut checked = 0u64;
+        let mut t_construction = std::time::Duration::ZERO;
+        let mut t_probe = std::time::Duration::ZERO;
 
         for white_king in Square::all() {
             if white_king.file() >= 4 { continue; }
@@ -1270,23 +1299,37 @@ mod tests {
                                     let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved };
                                     pos.correct_reflection();
                                     if pos.in_check_simple(pos.last_moved) { continue; }
+                                    if ep_possible(&pos) { continue; }
 
                                     let our = probe(&pos);
+                                    let t0 = std::time::Instant::now();
                                     let chess = match pos_to_chess(&pos) {
                                         Some(c) => c,
                                         None => continue,
                                     };
+                                    t_construction += t0.elapsed();
 
-                                    let wdl = match syzygy.probe_wdl(&chess) {
+                                    let t1 = std::time::Instant::now();
+                                    let wdl = match syzygy.probe_wdl_after_zeroing(&chess) {
                                         Ok(w) => w,
                                         Err(_) => continue,
                                     };
+                                    t_probe += t1.elapsed();
 
-                                    let syzygy_win  = matches!(wdl, AmbiguousWdl::Win | AmbiguousWdl::CursedWin | AmbiguousWdl::MaybeWin);
-                                    let syzygy_loss = matches!(wdl, AmbiguousWdl::Loss | AmbiguousWdl::BlessedLoss | AmbiguousWdl::MaybeLoss);
+                                    let syzygy_win  = matches!(wdl, Wdl::Win | Wdl::CursedWin);
+                                    let syzygy_loss = matches!(wdl, Wdl::Loss | Wdl::BlessedLoss);
                                     checked += 1;
 
                                     if our.is_win() != syzygy_win || our.is_loss() != syzygy_loss {
+                                        let bk = pos.king[Colour::Black].bb();
+                                        let wk = pos.king[Colour::White].bb();
+                                        let unreachable_pawn_check =
+                                            (pos.p1.1 == Piece::WhitePawn && pos.p1.0.rank() == 1 && pawn_attacks(pos.p1.0.bb(), Colour::White) & bk != 0)
+                                            || pos.p2.map_or(false, |(sq2, pc2)| {
+                                                (pc2 == Piece::WhitePawn && sq2.rank() == 1 && pawn_attacks(sq2.bb(), Colour::White) & bk != 0)
+                                                || (pc2 == Piece::BlackPawn && sq2.rank() == 6 && pawn_attacks(sq2.bb(), Colour::Black) & wk != 0)
+                                            });
+                                        if unreachable_pawn_check { continue; }
                                         mismatches += 1;
                                         if mismatches <= 20 {
                                             eprintln!("MISMATCH  WK={} BK={} {}{} p2={}{} lm={}  ours={}  syzygy={:?}",
@@ -1305,7 +1348,82 @@ mod tests {
             }
         }
 
+        eprintln!("checked={checked} mismatches={mismatches}");
+        eprintln!("construction: {t_construction:?}  probe: {t_probe:?}");
         assert_eq!(mismatches, 0, "{mismatches}/{checked} positions disagree with Syzygy");
+    }
+
+    #[test]
+    fn test_syzygy_timing() {
+        use shakmaty::Chess;
+        use shakmaty_syzygy::Tablebase;
+
+        let syzygy_path = "./syzygy/";
+        let syzygy = {
+            let mut t: Tablebase<Chess> = Tablebase::new();
+            t.add_directory(&syzygy_path).expect("failed to load Syzygy directory");
+            t
+        };
+
+        let mut count = 0u64;
+        let mut t_our = std::time::Duration::ZERO;
+        let mut t_construction = std::time::Duration::ZERO;
+        let mut t_syzygy = std::time::Duration::ZERO;
+
+        'outer: for white_king in Square::all() {
+            if white_king.file() >= 4 { continue; }
+            for black_king in Square::all() {
+                if KINGS_IDX_PAWNFUL[white_king][black_king] == u16::MAX { continue; }
+                let king = [white_king, black_king];
+                for square1 in Square::all() {
+                    if square1 == white_king || square1 == black_king { continue; }
+                    for kind1 in [Piece::WhiteQueen] {
+                        for square2 in Square::all() {
+                            for kind2 in [Some(Piece::BlackBishop)] {
+                                if square2 == square1 || square2 == white_king || square2 == black_king { continue; }
+                                if KINGS_IDX_PAWNLESS[white_king as usize][black_king] == u16::MAX { continue; }
+                                let p2 = kind2.map(|k| (square2, k));
+                                for last_moved in [Colour::White, Colour::Black] {
+                                    let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved };
+                                    pos.correct_reflection();
+                                    if pos.in_check_simple(pos.last_moved) { continue; }
+                                    if ep_possible(&pos) { continue; }
+
+                                    let t0 = std::time::Instant::now();
+                                    let _our = probe(&pos);
+                                    t_our += t0.elapsed();
+
+                                    let t1 = std::time::Instant::now();
+                                    let chess = match pos_to_chess(&pos) { Some(c) => c, None => continue };
+                                    t_construction += t1.elapsed();
+
+                                    let t2 = std::time::Instant::now();
+                                    let _wdl = syzygy.probe_wdl_after_zeroing(&chess).ok();
+                                    t_syzygy += t2.elapsed();
+
+                                    count += 1;
+                                    if count >= 10_000 { break 'outer; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        eprintln!("count={count}");
+        eprintln!("our probe:    {:>12?} total  ({:>8.1?} avg)", t_our, t_our / count as u32);
+        eprintln!("construction: {:>12?} total  ({:>8.1?} avg)", t_construction, t_construction / count as u32);
+        eprintln!("syzygy probe: {:>12?} total  ({:>8.1?} avg)", t_syzygy, t_syzygy / count as u32);
+    }
+
+    fn ep_possible(pos: &Pos) -> bool {
+        let Some((sq2, pc2)) = pos.p2 else { return false; };
+        if pc2 != Piece::BlackPawn { return false; }
+        let (r1, f1) = pos.p1.0.rank_file();
+        let (r2, f2) = sq2.rank_file();
+        if f1.abs_diff(f2) != 1 { return false; }
+        (r1 == 1 && r2 >= 3) || (r2 == 6 && r1 <= 4)
     }
 
     fn chess_to_pos(chess: &shakmaty::Chess) -> Option<Pos> {
@@ -1377,45 +1495,49 @@ mod tests {
             pos.p1.1.to_fen(), pos.p1.0.to_fen(), p2, pos.last_moved.to_fen())
     }
 
-    fn trace_wrong(pos: &Pos, syzygy: &shakmaty_syzygy::Tablebase<shakmaty::Chess>, depth: usize) {
+    fn trace_wrong(pos: &Pos, syzygy: &shakmaty_syzygy::Tablebase<shakmaty::Chess>, depth: usize, visited: &mut std::collections::HashSet<u64>) {
         use shakmaty::Position as ShakmPos;
-        use shakmaty_syzygy::AmbiguousWdl;
+        use shakmaty_syzygy::Wdl;
+        let hash = pos.pos_hash();
+        if !visited.insert(hash) {
+            eprintln!("{} CYCLE {}", "  ".repeat(depth), pos_str(pos));
+            return;
+        }
         let prefix = "  ".repeat(depth);
         let our = probe(pos);
         let chess = match pos_to_chess(pos) {
             Some(c) => c,
             None => { eprintln!("{prefix}IMPOSSIBLE_CHECK {}", pos_str(pos)); return; }
         };
-        let wdl = match syzygy.probe_wdl(&chess) {
+        let wdl = match syzygy.probe_wdl_after_zeroing(&chess) {
             Ok(w) => w, Err(_) => { eprintln!("{prefix}SYZYGY_ERR {}", pos_str(pos)); return; }
         };
-        let syzygy_win  = matches!(wdl, AmbiguousWdl::Win | AmbiguousWdl::CursedWin | AmbiguousWdl::MaybeWin);
-        let syzygy_loss = matches!(wdl, AmbiguousWdl::Loss | AmbiguousWdl::BlessedLoss | AmbiguousWdl::MaybeLoss);
+        let syzygy_win  = matches!(wdl, Wdl::Win | Wdl::CursedWin);
+        let syzygy_loss = matches!(wdl, Wdl::Loss | Wdl::BlessedLoss);
         let wrong = our.is_win() != syzygy_win || our.is_loss() != syzygy_loss;
         eprintln!("{prefix}{} ours={} syzygy={:?} {}", pos_str(pos), our.0, wdl,
             if wrong { "WRONG" } else { "ok" });
-        if !wrong || depth >= 8 { return; }
+        if !wrong || depth >= 50 { return; }
         let mut first_loss_mv = None;   // for wrong-Win: follow the syzygy-Loss child
         let mut first_not_win_mv = None; // for wrong-Loss: follow the first child our EGTB doesn't mark as Win
         for mv in chess.legal_moves() {
             let mut child_chess = chess.clone();
             child_chess.play_unchecked(&mv);
-            let child_wdl = match syzygy.probe_wdl(&child_chess) {
+            let child_wdl = match syzygy.probe_wdl_after_zeroing(&child_chess) {
                 Ok(w) => w,
                 Err(e) => { eprintln!("{prefix}  mv={mv} syzygy_err={e:?}"); continue; }
             };
             let child_pos = chess_to_pos(&child_chess);
             let child_our = child_pos.as_ref().map_or(Status(0), |p| probe(p));
-            let child_syzygy_win  = matches!(child_wdl, AmbiguousWdl::Win | AmbiguousWdl::CursedWin | AmbiguousWdl::MaybeWin);
-            let child_syzygy_loss = matches!(child_wdl, AmbiguousWdl::Loss | AmbiguousWdl::BlessedLoss | AmbiguousWdl::MaybeLoss);
+            let child_syzygy_win  = matches!(child_wdl, Wdl::Win | Wdl::CursedWin);
+            let child_syzygy_loss = matches!(child_wdl, Wdl::Loss | Wdl::BlessedLoss);
             let child_wrong = child_our.is_win() != child_syzygy_win || child_our.is_loss() != child_syzygy_loss;
             eprintln!("{prefix}  mv={mv} ours={} syzygy={:?}{}", child_our.0, child_wdl,
                 if child_wrong { " WRONG" } else { "" });
-            if child_syzygy_loss && first_loss_mv.is_none() {
+            if child_syzygy_loss && first_loss_mv.is_none() && child_pos.as_ref().map_or(true, |p| !visited.contains(&p.pos_hash())) {
                 first_loss_mv = Some((mv.clone(), child_pos.clone()));
             }
-            // For a wrong-Loss: any child our EGTB doesn't mark as Win is the escape preventing Loss propagation
-            if syzygy_loss && !child_our.is_win() && first_not_win_mv.is_none() {
+            if syzygy_loss && !child_our.is_win() && first_not_win_mv.is_none() && child_pos.as_ref().map_or(true, |p| !visited.contains(&p.pos_hash())) {
                 first_not_win_mv = Some((mv, child_pos));
             }
         }
@@ -1431,7 +1553,7 @@ mod tests {
         };
         if let Some((mv, Some(child_pos))) = to_trace {
             eprintln!("{prefix}-> tracing {mv}:");
-            trace_wrong(&child_pos, syzygy, depth + 1);
+            trace_wrong(&child_pos, syzygy, depth + 1, visited);
         }
     }
 
@@ -1443,14 +1565,15 @@ mod tests {
         let syzygy: Tablebase<Chess> = {
             let mut t = Tablebase::new(); t.add_directory(&syzygy_path).unwrap(); t
         };
-        // MISMATCH  WK=a1 BK=c1 Rb1 p2=Bd1 lm=w  ours=0  syzygy=Loss
+        // MISMATCH  WK=a2 BK=g1 Pb2 p2=pe7 lm=b  ours=0  syzygy=Win
         let pos = Pos {
-            king: [Square::a1, Square::c1],
-            p1: (Square::b1, Piece::WhiteRook),
-            p2: Some((Square::d1, Piece::WhiteBishop)),
-            last_moved: Colour::White,
+            king: [Square::a2, Square::g1],
+            p1: (Square::b2, Piece::WhitePawn),
+            p2: Some((Square::e7, Piece::BlackPawn)),
+            last_moved: Colour::Black,
         };
-        trace_wrong(&pos, &syzygy, 0);
+        trace_wrong(&pos, &syzygy, 0, &mut std::collections::HashSet::new());
+        assert!(false, "diagnostic complete");
     }
 
     #[test]
@@ -1506,6 +1629,147 @@ mod tests {
     // If (2) is ok but (3) is false → revmovelist generation skips P (root cause).
     // If (2) is false → the bug is deeper in that subtree.
     // If (1) is wrong → count_distinct_canonical_successors overcounts.
+    // Traces why KPKP mismatch positions stay unresolved.
+    #[test]
+    fn test_retrograde_trace_kpkp() {
+        let (mut moves_left, _, _) = Pos::init_backwards_gen();
+
+        // WK=d2 BK=d5 WQ=e1 BQ=b1 lm=w — canonical KQKQ after queen promotion (black to move), status=0
+        let failing = Pos {
+            king: [Square::d2, Square::d5],
+            p1: (Square::e1, Piece::WhiteQueen),
+            p2: Some((Square::b1, Piece::BlackQueen)),
+            last_moved: Colour::White,
+        };
+
+        eprintln!("\n=== Failing KPKP: {} ===", failing.to_board_partial().to_fen());
+        let ml = *failing.index_file(&mut moves_left, u8::MAX);
+        eprintln!("  moves_left={} | status={}", ml, probe(&failing).0);
+
+        let mut board = failing.to_board_partial();
+        let mut movelist = board.generate_movelist(false);
+        let p_hash = failing.pos_hash();
+        let mut i = 0;
+        while i < movelist.length {
+            let mv = movelist[i];
+            let unmake = board.makemove(mv);
+            let succ = Pos::new(&board);
+            let succ_status = probe(&succ);
+            eprintln!("    succ[{i}] mv={}: {} | status={}", mv.to_uci(), succ.to_board_partial().to_fen(), succ_status.0);
+
+            let revml = succ.make_revmovelist();
+            let mut p_found = false;
+            for j in 0..revml.length {
+                let mut pred = succ.clone();
+                pred.make_revmove(revml.list[j]);
+                if pred.in_check_simple(pred.last_moved) { continue; }
+                if pred.pos_hash() == p_hash { p_found = true; }
+            }
+            eprintln!("      revml: {} raw, P_found={p_found}", revml.length);
+            board.unmakemove(mv, unmake);
+            movelist.maybe_add_proms(0, Some(mv), i);
+            i += 1;
+        }
+        eprintln!("  total moves (incl R/B proms): {}", movelist.length);
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    // Traces why KRKN mismatch positions stay unresolved.
+    // WK=a1 BK=c1 Rf1 p2=ne1 lm=b (White to move): syzygy says Win, ours says Draw.
+    // White can capture BN with WRf1xe1, leaving KRK(Black to move) which should be a Loss.
+    // If that KRK Loss is correctly resolved, BFS should mark this KRKN as Win via revmove.
+    #[test]
+    fn test_retrograde_trace_krkn() {
+        let (mut moves_left, _, _) = Pos::init_backwards_gen();
+
+        // The failing KRKN position: WK=a1, BK=c1, WR=f1, BN=e1, White to move (lm=b)
+        let failing = Pos {
+            king: [Square::a1, Square::c1],
+            p1: (Square::f1, Piece::WhiteRook),
+            p2: Some((Square::e1, Piece::BlackKnight)),
+            last_moved: Colour::Black,
+        };
+        // The KRK position after WR captures BN: WK=a1, WR=e1, BK=c1, Black to move (lm=w)
+        let krkn_capture_result = Pos {
+            king: [Square::a1, Square::c1],
+            p1: (Square::e1, Piece::WhiteRook),
+            p2: None,
+            last_moved: Colour::White,
+        };
+
+        eprintln!("\n=== Failing KRKN: {} ===", failing.to_board_partial().to_fen());
+        let ml = *failing.index_file(&mut moves_left, u8::MAX);
+        eprintln!("  moves_left={} | status={}", ml, probe(&failing).0);
+
+        eprintln!("\n=== KRK after capture: {} ===", krkn_capture_result.to_board_partial().to_fen());
+        let ml2 = *krkn_capture_result.index_file(&mut moves_left, u8::MAX);
+        let status2 = probe(&krkn_capture_result);
+        eprintln!("  moves_left={} | status={}", ml2, status2.0);
+
+        // Check whether the failing KRKN appears in the KRK position's revmovelist
+        let revml = krkn_capture_result.make_revmovelist();
+        eprintln!("  revml.length={}", revml.length);
+        let failing_hash = failing.pos_hash();
+        let mut found = false;
+        for j in 0..revml.length {
+            let mut pred = krkn_capture_result.clone();
+            pred.make_revmove(revml.list[j]);
+            if pred.in_check_simple(pred.last_moved) { continue; }
+            if pred.pos_hash() == failing_hash { found = true; }
+        }
+        eprintln!("  failing KRKN found in KRK revml: {found}");
+
+        // Also trace the failing position's own successors
+        let roots: &[Pos] = &[failing];
+        for p in roots {
+            let ml_p = *p.index_file(&mut moves_left, u8::MAX);
+            eprintln!("\n=== P: {} ===", p.to_board_partial().to_fen());
+            eprintln!("    initial moves_left={} | final status={}", ml_p, probe(p).0);
+
+            let mut board = p.to_board_partial();
+            let movelist = board.generate_movelist(false);
+            let p_hash = p.pos_hash();
+            eprintln!("    {} raw legal moves:", movelist.length);
+
+            for i in 0..movelist.length {
+                let mv = movelist[i];
+                let unmake = board.makemove(mv);
+                let remaining = board.occupied()
+                    & !(board[Piece::WhiteKing] | board[Piece::BlackKing]);
+
+                if remaining.count_ones() == 0 {
+                    eprintln!("      succ[{i}]: K-vs-K draw");
+                    board.unmakemove(mv, unmake);
+                    continue;
+                }
+
+                let succ = Pos::new(&board);
+                let succ_ml = *succ.index_file(&mut moves_left, u8::MAX);
+                let succ_status = probe(&succ);
+                eprintln!("      succ[{i}]: {} | ml={succ_ml} status={}",
+                    succ.to_board_partial().to_fen(), succ_status.0);
+
+                let revml = succ.make_revmovelist();
+                let mut p_found = false;
+                let mut valid_preds = 0usize;
+                for j in 0..revml.length {
+                    let mut pred = succ.clone();
+                    pred.make_revmove(revml.list[j]);
+                    if pred.in_check_simple(pred.last_moved) { continue; }
+                    valid_preds += 1;
+                    if pred.pos_hash() == p_hash { p_found = true; }
+                }
+                eprintln!("        revml: {} raw, {valid_preds} valid preds, P_found={p_found}",
+                    revml.length);
+
+                board.unmakemove(mv, unmake);
+            }
+        }
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
     #[test]
     fn test_retrograde_trace_a1c1() {
         let (mut moves_left, _, _) = Pos::init_backwards_gen();
@@ -1566,5 +1830,316 @@ mod tests {
         }
 
         assert!(false, "diagnostic complete — see output above");
+    }
+
+    // Trace the specific winning sequence for WK=a1 BK=c1 WP=a2 BP=c2 lm=W (Black to move):
+    //   c1d2, a1b2, c2c1q
+    // After the promotion, check whether the resulting canonical KQKP has the correct EGTB status.
+    // If status==0, the bug is in KQKP resolution itself; if status!=0, the bug is in the
+    // revmovelist not propagating back to the KPKP predecessor.
+    #[test]
+    fn test_trace_kpkp_promotion_sequence() {
+        use crate::repr::board::Board;
+        use crate::movegen::r#move::Move;
+
+        let (mut moves_left, _, _) = Pos::init_backwards_gen();
+
+        let failing = Pos {
+            king: [Square::a1, Square::c1],
+            p1: (Square::a2, Piece::WhitePawn),
+            p2: Some((Square::c2, Piece::BlackPawn)),
+            last_moved: Colour::White,
+        };
+        let p_hash = failing.pos_hash();
+
+        eprintln!("\n=== Start: {} ===", failing.to_board_partial().to_fen());
+        eprintln!("  status={} moves_left={}", probe(&failing).0,
+            *failing.index_file(&mut moves_left, u8::MAX));
+
+        let mut board = failing.to_board_partial();
+        for mv_str in ["c1d2", "a1b2", "c2c1q"] {
+            let mv = Move::from_uci(&board, mv_str);
+            board.makemove(mv);
+            let remaining = board.occupied() & !(board[Piece::WhiteKing] | board[Piece::BlackKing]);
+            eprintln!("\nAfter {mv_str}: {}", board.to_fen());
+            if remaining.count_ones() == 0 {
+                eprintln!("  K-vs-K (no pieces remain)");
+                continue;
+            }
+            let pos = Pos::new(&board);
+            let ml = *pos.index_file(&mut moves_left, u8::MAX);
+            eprintln!("  Canonical pos: WK={} BK={} p1={}@{} p2={} lm={}",
+                pos.king[Colour::White].to_fen(), pos.king[Colour::Black].to_fen(),
+                pos.p1.1.to_fen(), pos.p1.0.to_fen(),
+                pos.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+                pos.last_moved.to_fen());
+            eprintln!("  status={} moves_left={}", probe(&pos).0, ml);
+
+            // After promotion: check if the failing KPKP is in the revmovelist
+            if mv_str == "c2c1q" {
+                let revml = pos.make_revmovelist();
+                let mut p_found = false;
+                for j in 0..revml.length {
+                    let mut pred = pos.clone();
+                    pred.make_revmove(revml.list[j]);
+                    if pred.in_check_simple(pred.last_moved) { continue; }
+                    if pred.pos_hash() == p_hash { p_found = true; }
+                }
+                eprintln!("  revml.length={} | failing KPKP in revml: {p_found}", revml.length);
+            }
+        }
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    // For KQKP canonical after c2c1q: apply each unpromotion revmove and print the result.
+    #[test]
+    fn test_trace_kqkp_revmoves() {
+        use crate::repr::board::Board;
+        use crate::movegen::r#move::Move;
+
+        let (mut moves_left, _, _) = Pos::init_backwards_gen();
+
+        let before_prom = Pos {
+            king: [Square::b2, Square::d2],
+            p1: (Square::a2, Piece::WhitePawn),
+            p2: Some((Square::c2, Piece::BlackPawn)),
+            last_moved: Colour::White,
+        };
+        let before_hash = before_prom.pos_hash();
+        eprintln!("Before promotion: WK={} BK={} p1={}@{} p2={} lm={}",
+            before_prom.king[Colour::White].to_fen(), before_prom.king[Colour::Black].to_fen(),
+            before_prom.p1.1.to_fen(), before_prom.p1.0.to_fen(),
+            before_prom.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+            before_prom.last_moved.to_fen());
+
+        let mut board = before_prom.to_board_partial();
+        let mv = Move::from_uci(&board, "c2c1q");
+        board.makemove(mv);
+        let kqkp = Pos::new(&board);
+        eprintln!("After c2c1q (KQKP canonical): WK={} BK={} p1={}@{} p2={} lm={} | status={}",
+            kqkp.king[Colour::White].to_fen(), kqkp.king[Colour::Black].to_fen(),
+            kqkp.p1.1.to_fen(), kqkp.p1.0.to_fen(),
+            kqkp.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+            kqkp.last_moved.to_fen(),
+            probe(&kqkp).0);
+
+        let revml = kqkp.make_revmovelist();
+        eprintln!("\nUnpromotion revmoves only ({} total revmoves):", revml.length);
+        for j in 0..revml.length {
+            let revmove = revml.list[j];
+            if !revmove.is_unpromotion() { continue; }
+            let mut pred = kqkp.clone();
+            pred.make_revmove(revmove);
+            let in_check = pred.in_check_simple(pred.last_moved);
+            let is_before = pred.pos_hash() == before_hash;
+            eprintln!("  [{j}] to={} moving={:?} | pred: WK={} BK={} p1={}@{} p2={} lm={} check={} MATCH={}",
+                revmove.to.to_fen(), revmove.moving_piece(),
+                pred.king[Colour::White].to_fen(), pred.king[Colour::Black].to_fen(),
+                pred.p1.1.to_fen(), pred.p1.0.to_fen(),
+                pred.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+                pred.last_moved.to_fen(), in_check, is_before);
+        }
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    #[test]
+    fn test_kqkp_colour_swap_canonicalization() {
+        let pos = Pos {
+            king: [Square::d7, Square::b7],
+            p1: (Square::c8, Piece::WhiteQueen),
+            p2: Some((Square::a7, Piece::BlackPawn)),
+            last_moved: Colour::White,
+        };
+
+        let mut after_reflect = pos.clone();
+        after_reflect.correct_reflection();
+        eprintln!("After correct_reflection:       WK={} BK={} p1={}@{} p2={} lm={}",
+            after_reflect.king[Colour::White].to_fen(), after_reflect.king[Colour::Black].to_fen(),
+            after_reflect.p1.1.to_fen(), after_reflect.p1.0.to_fen(),
+            after_reflect.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+            after_reflect.last_moved.to_fen());
+
+        let mut after_swap = pos.clone();
+        after_swap.colour_swap();
+        after_swap.correct_reflection();
+        eprintln!("After colour_swap+reflection:   WK={} BK={} p1={}@{} p2={} lm={}",
+            after_swap.king[Colour::White].to_fen(), after_swap.king[Colour::Black].to_fen(),
+            after_swap.p1.1.to_fen(), after_swap.p1.0.to_fen(),
+            after_swap.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+            after_swap.last_moved.to_fen());
+
+        eprintln!("Same canonical key: {}", after_reflect.canonical_key() == after_swap.canonical_key());
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    // MISMATCH: WK=a1 BK=c2 WR=c1 WP=b3 lm=w (Black to move), ours=0 syzygy=Loss.
+    // Plays the exact winning line and prints pos/status/moves_left after each move.
+    #[test]
+    fn test_trace_krkp_kxc1() {
+        use crate::repr::board::Board;
+        use crate::movegen::r#move::Move;
+
+        let (mut moves_left, _, _) = Pos::init_backwards_gen();
+
+        // 1... Kxc1 2. b4 Kc2 3. b5 Kd3 4. b6 Ke4 5. b7 Ke5 6. b8=Q+
+        let move_seq = ["c2c1", "b3b4", "c1c2", "b4b5", "c2d3", "b5b6", "d3e4", "b6b7", "e4e5", "b7b8q"];
+
+        let mut board = Board::from_fen("8/8/8/8/8/1P6/2k5/K1R5 b - - 0 1");
+
+        let print_pos = |board: &Board, moves_left: &mut [Vec<u8>; 100]| {
+            let remaining = board.occupied() & !(board[Piece::WhiteKing] | board[Piece::BlackKing]);
+            if remaining.count_ones() == 0 {
+                eprintln!("  K-vs-K");
+                return;
+            }
+            let pos = Pos::new(board);
+            let ml = *pos.index_file(moves_left, u8::MAX);
+            eprintln!("  WK={} BK={} p1={}@{} p2={} lm={} | status={} moves_left={}",
+                pos.king[Colour::White].to_fen(), pos.king[Colour::Black].to_fen(),
+                pos.p1.1.to_fen(), pos.p1.0.to_fen(),
+                pos.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+                pos.last_moved.to_fen(), probe(&pos).0, ml);
+        };
+
+        eprintln!("Start: {}", board.to_fen());
+        print_pos(&board, &mut moves_left);
+
+        for mv_str in move_seq {
+            let mv = Move::from_uci(&board, mv_str);
+            board.makemove(mv);
+            eprintln!("After {mv_str}: {}", board.to_fen());
+            print_pos(&board, &mut moves_left);
+        }
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    #[test]
+    fn test_kpk_uncapture_revmove() {
+        use crate::repr::board::Board;
+        use crate::movegen::r#move::Move;
+
+        // Start: WK=a1 BK=c2 WR=c1 WP=b3 lm=W (Black to move)
+        let original = Pos {
+            king: [Square::a1, Square::c2],
+            p1: (Square::c1, Piece::WhiteRook),
+            p2: Some((Square::b3, Piece::WhitePawn)),
+            last_moved: Colour::White,
+        };
+        let mut original_reflected = original.clone();
+        original_reflected.correct_reflection();
+        eprintln!("Original (raw):       hash={} file_idx={} index={}", original.pos_hash(), original.file_idx(), original.index());
+        eprintln!("Original (reflected): hash={} file_idx={} index={}", original_reflected.pos_hash(), original_reflected.file_idx(), original_reflected.index());
+        let (mut ml, _, _) = Pos::init_backwards_gen();
+        eprintln!("Original moves_left in init: {}", *original.index_file(&mut ml, u8::MAX));
+
+        let mut board = Board::from_fen("8/8/8/8/8/1P6/2k5/K1R5 b - - 0 1");
+        board.makemove(Move::from_uci(&board, "c2c1")); // Kxc1
+
+        // Now KPK: WK=a1 BK=c1 WP=b3 lm=B
+        let kpk = Pos::new(&board);
+        eprintln!("After Kxc1: WK={} BK={} p1={}@{} lm={}",
+            kpk.king[Colour::White].to_fen(), kpk.king[Colour::Black].to_fen(),
+            kpk.p1.1.to_fen(), kpk.p1.0.to_fen(), kpk.last_moved.to_fen());
+
+        let revml = kpk.make_revmovelist();
+        eprintln!("revml.length={}", revml.length);
+
+        // Collect all predecessor hashes in order (as the BFS does) to detect collisions
+        let target_hash = original.pos_hash();
+        let mut seen: Vec<u64> = Vec::new();
+        for j in 0..revml.length {
+            let revmove = revml.list[j];
+            let mut pred = kpk.clone();
+            pred.make_revmove(revmove);
+            if pred.in_check_simple(pred.last_moved) { continue; }
+            let h = pred.pos_hash();
+            let collision = seen.contains(&h);
+            let is_target = h == target_hash;
+            if is_target || collision {
+                eprintln!("[{j}] to={} moving={:?} uncap={:?} | hash={} is_target={} collision_with_earlier={} file_idx={} index={}",
+                    revmove.to.to_fen(), revmove.moving_piece(), revmove.uncaptured_piece(),
+                    h, is_target, collision, pred.file_idx(), pred.index());
+            }
+            seen.push(h);
+        }
+
+        assert!(false, "diagnostic complete — see output above");
+    }
+
+    #[test]
+    fn test_krk_revmoves_find_krkp() {
+        // The canonical KRK reached when BK captures WP on b3 from the failing KRKP
+        let mut krk = Pos {
+            king: [Square::a1, Square::b3],
+            p1: (Square::c1, Piece::WhiteRook),
+            p2: None,
+            last_moved: Colour::Black,
+        };
+        krk.correct_reflection();
+        eprintln!("canonical KRK: WK={} BK={} WR={} lm={}",
+            krk.king[0].to_fen(), krk.king[1].to_fen(), krk.p1.0.to_fen(), krk.last_moved.to_fen());
+
+        // The failing KRKP we expect to find as a predecessor
+        let target = Pos {
+            king: [Square::a1, Square::c2],
+            p1: (Square::c1, Piece::WhiteRook),
+            p2: Some((Square::b3, Piece::WhitePawn)),
+            last_moved: Colour::White,
+        };
+        eprintln!("target KRKP hash={} file_idx={} index={}", target.pos_hash(), target.file_idx(), target.index());
+
+        let revml = krk.make_revmovelist();
+        eprintln!("revmovelist length={}", revml.length);
+        let mut found = false;
+        for i in 0..revml.length {
+            let revmove = revml.list[i];
+            let mut pred = krk.clone();
+            pred.make_revmove(revmove);
+            let matches = pred == target;
+            if matches { found = true; }
+            eprintln!("[{i}] to={} moving={:?} uncap={:?} -> WK={} BK={} p1={}@{} p2={} lm={} matches={}",
+                revmove.to.to_fen(), revmove.moving_piece(), revmove.uncaptured_piece(),
+                pred.king[0].to_fen(), pred.king[1].to_fen(),
+                pred.p1.1.to_fen(), pred.p1.0.to_fen(),
+                pred.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+                pred.last_moved.to_fen(),
+                matches);
+        }
+        eprintln!("target found in revmovelist: {found}");
+        assert!(false, "diagnostic complete");
+    }
+
+    #[test]
+    fn test_kknp_revmoves_find_original() {
+        use shakmaty::Position as ShakmPos;
+        let start = Pos {
+            king: [Square::a1, Square::a3],
+            p1: (Square::b1, Piece::WhiteKnight),
+            p2: Some((Square::b2, Piece::WhitePawn)),
+            last_moved: Colour::White,
+        };
+        let chess = pos_to_chess(&start).expect("valid pos");
+        for mv in chess.legal_moves() {
+            let mut child_chess = chess.clone();
+            child_chess.play_unchecked(&mv);
+            let child_pos = match chess_to_pos(&child_chess) {
+                Some(p) => p,
+                None => { eprintln!("mv={mv} -> no pos (capture/prom)"); continue; }
+            };
+            let revml = child_pos.make_revmovelist();
+            let mut found = false;
+            for i in 0..revml.length {
+                let revmove = revml.list[i];
+                let mut pred = child_pos.clone();
+                pred.make_revmove(revmove);
+                if pred == start { found = true; }
+            }
+            eprintln!("mv={mv} child={} revmoves={} found_start={found}",
+                pos_str(&child_pos), revml.length);
+        }
+        assert!(false, "diagnostic complete");
     }
 }

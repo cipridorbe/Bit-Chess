@@ -233,7 +233,7 @@ impl MoveList {
         MoveList {
             moves: [Move::new_invalid(); MAX_MOVES],
             length: 0,
-            explored: 0,
+            explored: -1,
             captures: 0,
             pinned: BB::new(0),
             queen_proms: 0,

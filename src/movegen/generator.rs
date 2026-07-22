@@ -124,7 +124,14 @@ fn generate_attackers_movelist(movelist: &mut MoveList, board: &Board, square: S
     let colour = board.colour;
     for pawn in BB::squares(pawn_attacks(square.bb(), !colour) & board[Piece::pawn(colour)]) {
         if movelist.pinned != 0 && pinned_moves[pawn as usize] & square == 0 { continue; }
-        movelist.add(Move::new(Flag::CAPTURE, square, pawn));
+        let mut mv = Move::new(Flag::CAPTURE, square, pawn);
+        if square.rank() == 0 || square.rank() == 7 {
+            movelist.add(mv.into_queen_prom());
+            movelist.add(mv.into_knight_prom());
+            movelist.queen_proms += 1;
+        } else {
+            movelist.add(mv);
+        }
     }
     for knight in BB::squares(single_knight_attacks(square) & board[Piece::knight(colour)]) {
         if movelist.pinned != 0 && pinned_moves[knight as usize] & square == 0 { continue; }

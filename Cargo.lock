@@ -584,8 +584,6 @@ dependencies = [
 [[package]]
 name = "shakmaty-syzygy"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7a02db44976cb00fcb43a0649a07aa5be6cc1718444a06d45bb6ebca6b13542"
 dependencies = [
  "arrayvec",
  "bitflags",

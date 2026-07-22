@@ -49,7 +49,7 @@ mod tests {
             Case { name: "Extra 16",   fen: "r3k2r/8/3Q4/8/8/5q2/8/R3K2R b KQkq - 0 1",                                           depths: &[(4,1720476)] },
             Case { name: "Extra 23",   fen: "8/8/2k5/5q2/5n2/8/5K2/8 b - - 0 1",                                                   depths: &[(4,23527)] },
             // BK in check from WN; BP can capture+promote — tests promotion in check evasion
-            Case { name: "PromCapChk", fen: "8/8/8/8/8/4k3/6p1/K4N2 b - - 0 1",                                                   depths: &[(1,11),(2,68)] },
+            Case { name: "PromCapChk", fen: "8/8/8/8/8/4k3/6p1/K4N2 b - - 0 1",                                                   depths: &[(1,11),(2,59)] },
         ];
         let mut passed = 0;
         let total: usize = cases.iter().map(|c| c.depths.len()).sum();

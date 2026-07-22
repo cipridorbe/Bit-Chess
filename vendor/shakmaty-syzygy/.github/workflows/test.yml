@@ -1,0 +1,23 @@
+name: Test
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v3
+        with:
+          path: tables
+          key: ${{ runner.os }}-${{ hashFiles('tables/*/TEST-SOURCE.txt') }}
+      - run: ./download-test-tables.sh
+      - run: cargo test
+      - run: cargo test --features variant
+      - run: cargo bench
+      - run: cargo check --manifest-path fuzz/Cargo.toml
+        env:
+          RUSTFLAGS: --cfg fuzzing

@@ -13,6 +13,7 @@ pub struct RevMove {
     // to is after possible unpromotion rotations
     pub to: Square,
     pub flag: u8,
+    pub diagonal: bool,
 }
 
 impl RevMove {
@@ -20,7 +21,7 @@ impl RevMove {
     pub const BLACK: [Option<Piece>; 6] = [None, Some(Piece::BlackPawn), Some(Piece::BlackKnight), Some(Piece::BlackBishop), Some(Piece::BlackRook), Some(Piece::BlackQueen)];
     pub const WHITEPAWNLESS: [Option<Piece>; 5] = [None, Some(Piece::WhiteKnight), Some(Piece::WhiteBishop), Some(Piece::WhiteRook), Some(Piece::WhiteQueen)];
     pub const BLACKPAWNLESS: [Option<Piece>; 5] = [None, Some(Piece::BlackKnight), Some(Piece::BlackBishop), Some(Piece::BlackRook), Some(Piece::BlackQueen)];
-    pub const NONE: Self = Self { to: Square::a1, flag: 0 };
+    pub const NONE: Self = Self { to: Square::a1, flag: 0, diagonal: false };
 
     const UNCAPTURE_MASK: u8 = 0x0f;
     const MOVING_PIECE_MASK: u8 = 0x30;
@@ -28,7 +29,7 @@ impl RevMove {
     const ENPASSANT_MASK: u8 = 0x40;
 
     pub fn new_raw(to: Square, flag: u8) -> Self {
-        Self { to, flag }
+        Self { to, flag, diagonal: false }
     }
 
     pub fn new(to: Square, uncaptured: Option<Piece>, moving_piece: MovingPiece, is_unpromotion: bool, is_unenpassant: bool) -> Self {
@@ -37,6 +38,11 @@ impl RevMove {
         if is_unpromotion { flag |= Self::PROM_MASK; }
         if is_unenpassant { flag |= Self::ENPASSANT_MASK; }
         Self::new_raw(to, flag)
+    }
+
+    pub fn with_diagonal(mut self) -> Self {
+        self.diagonal = true;
+        self
     }
 
     pub fn is_quiet(self) -> bool {

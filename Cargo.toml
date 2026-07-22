@@ -17,3 +17,6 @@ serde_json = "1"
 [dev-dependencies]
 shakmaty = "0.26"
 shakmaty-syzygy = "0.24"
+
+[patch.crates-io]
+shakmaty-syzygy = { path = "vendor/shakmaty-syzygy" }
