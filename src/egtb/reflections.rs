@@ -62,6 +62,25 @@ pub const DIAGONAL: [Square; 64] = {
     out
 };
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReflectionSequence {
+    None,
+    D,  // inverse is D
+    V,  // inverse is V
+    VD, // inverse is D then V
+}
+
+impl ReflectionSequence {
+    pub fn apply_square(self, sq: Square) -> Square {
+        match self {
+            Self::None => sq,
+            Self::D    => DIAGONAL[sq],
+            Self::V    => VERTICAL[sq],
+            Self::VD   => VERTICAL[DIAGONAL[sq]],
+        }
+    }
+}
+
 mod test {
     use super::*;
 

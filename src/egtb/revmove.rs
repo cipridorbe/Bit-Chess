@@ -1,4 +1,4 @@
-use crate::repr::{piece::Piece, square::Square};
+use crate::{egtb::reflections::ReflectionSequence, repr::{piece::Piece, square::Square}};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MovingPiece {
@@ -13,7 +13,7 @@ pub struct RevMove {
     // to is after possible unpromotion rotations
     pub to: Square,
     pub flag: u8,
-    pub diagonal: bool,
+    pub reflection: ReflectionSequence,
 }
 
 impl RevMove {
@@ -21,7 +21,7 @@ impl RevMove {
     pub const BLACK: [Option<Piece>; 6] = [None, Some(Piece::BlackPawn), Some(Piece::BlackKnight), Some(Piece::BlackBishop), Some(Piece::BlackRook), Some(Piece::BlackQueen)];
     pub const WHITEPAWNLESS: [Option<Piece>; 5] = [None, Some(Piece::WhiteKnight), Some(Piece::WhiteBishop), Some(Piece::WhiteRook), Some(Piece::WhiteQueen)];
     pub const BLACKPAWNLESS: [Option<Piece>; 5] = [None, Some(Piece::BlackKnight), Some(Piece::BlackBishop), Some(Piece::BlackRook), Some(Piece::BlackQueen)];
-    pub const NONE: Self = Self { to: Square::a1, flag: 0, diagonal: false };
+    pub const NONE: Self = Self { to: Square::a1, flag: 0, reflection: ReflectionSequence::None };
 
     const UNCAPTURE_MASK: u8 = 0x0f;
     const MOVING_PIECE_MASK: u8 = 0x30;
@@ -29,7 +29,7 @@ impl RevMove {
     const ENPASSANT_MASK: u8 = 0x40;
 
     pub fn new_raw(to: Square, flag: u8) -> Self {
-        Self { to, flag, diagonal: false }
+        Self { to, flag, reflection: ReflectionSequence::None }
     }
 
     pub fn new(to: Square, uncaptured: Option<Piece>, moving_piece: MovingPiece, is_unpromotion: bool, is_unenpassant: bool) -> Self {
@@ -40,8 +40,8 @@ impl RevMove {
         Self::new_raw(to, flag)
     }
 
-    pub fn with_diagonal(mut self) -> Self {
-        self.diagonal = true;
+    pub fn with_reflection(mut self, seq: ReflectionSequence) -> Self {
+        self.reflection = seq;
         self
     }
 
@@ -75,7 +75,7 @@ impl RevMove {
 
 }
 
-pub const MAX_REV_MOVES: usize = 255;
+pub const MAX_REV_MOVES: usize = 400;
 
 pub struct RevMoveList {
     pub list: [RevMove; MAX_REV_MOVES],

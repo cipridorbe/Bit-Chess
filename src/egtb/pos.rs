@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, io::{BufReader, BufWriter, Read, Write}, u8};
-use crate::test_assert;
+use crate::{egtb::revmove::MAX_REV_MOVES, test_assert};
 
-use crate::{egtb::{KINGS_IDX_PAWNFUL, KINGS_IDX_PAWNLESS, reflections::{DIAGONAL, HORIZONTAL, VERTICAL}, revmove::{MovingPiece, RevMove, RevMoveList}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, tables::KING_ATTACKS}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}};
+use crate::{egtb::{KINGS_IDX_PAWNFUL, KINGS_IDX_PAWNLESS, reflections::{DIAGONAL, HORIZONTAL, VERTICAL, ReflectionSequence}, revmove::{MovingPiece, RevMove, RevMoveList}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, tables::KING_ATTACKS}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Pos {
@@ -9,6 +9,17 @@ pub struct Pos {
     p1: (Square, Piece),
     p2: Option<(Square, Piece)>,
     last_moved: Colour
+}
+
+impl ReflectionSequence {
+    pub fn apply_pos(self, pos: &mut Pos) {
+        match self {
+            Self::None => {}
+            Self::D    => pos.reflect(DIAGONAL),
+            Self::V    => pos.reflect(VERTICAL),
+            Self::VD   => { pos.reflect(DIAGONAL); pos.reflect(VERTICAL); }
+        }
+    }
 }
 
 impl Pos {
@@ -356,7 +367,7 @@ impl Pos {
     }
 
     fn make_revmove_onepiece(&mut self, revmove: RevMove) {
-        if revmove.diagonal { self.reflect(DIAGONAL); }
+        revmove.reflection.apply_pos(self);
         let moving = revmove.moving_piece();
         let from = match moving {
             MovingPiece::WhiteKing => {
@@ -444,9 +455,13 @@ impl Pos {
                     }
                 }
             }
-            if self.p1.1 != Piece::WhitePawn && self.king[Colour::Black].file() != 0 && self.king[Colour::Black].file() != 7 {
-                for target in targets.squares() {
-                    out.add(RevMove::new(DIAGONAL[target], Some(Piece::WhitePawn), MovingPiece::BlackKing, false, false).with_diagonal());
+            if self.p1.1 != Piece::WhitePawn {
+                for refseq in [ReflectionSequence::D, ReflectionSequence::V, ReflectionSequence::VD] {
+                    if refseq.apply_square(self.king[Colour::Black]).rank() != 0 && refseq.apply_square(self.king[Colour::Black]).rank() != 7 {
+                        for target in targets.squares() {
+                            out.add(RevMove::new(refseq.apply_square(target), Some(Piece::WhitePawn), MovingPiece::BlackKing, false, false).with_reflection(refseq));
+                        }
+                    }
                 }
             }
             return out;
@@ -467,9 +482,13 @@ impl Pos {
                 }
             }
         }
-        if self.p1.1 != Piece::WhitePawn && self.king[Colour::White].file() != 0 && self.king[Colour::White].file() != 7 {
-            for target in king_targets.squares() {
-                out.add(RevMove::new(DIAGONAL[target], Some(Piece::BlackPawn), MovingPiece::WhiteKing, false, false).with_diagonal());
+        if self.p1.1 != Piece::WhitePawn {
+            for refseq in [ReflectionSequence::D, ReflectionSequence::V, ReflectionSequence::VD] {
+                if refseq.apply_square(self.king[Colour::White]).rank() != 0 && refseq.apply_square(self.king[Colour::White]).rank() != 7 {
+                    for target in king_targets.squares() {
+                        out.add(RevMove::new(refseq.apply_square(target), Some(Piece::BlackPawn), MovingPiece::WhiteKing, false, false).with_reflection(refseq));
+                    }
+                }
             }
         }
         if self.p1.1 == Piece::WhitePawn && self.p1.0.rank() == 1 {
@@ -515,9 +534,11 @@ impl Pos {
                 }
             }
         }
-        if self.p1.0.file() != 0 && self.p1.0.file() != 7 {
-            for target in targets.squares() {
-                out.add(RevMove::new(DIAGONAL[target], Some(Piece::BlackPawn), MovingPiece::P1, false, false).with_diagonal());
+        for refseq in [ReflectionSequence::D, ReflectionSequence::V, ReflectionSequence::VD] {
+            if refseq.apply_square(self.p1.0).rank() != 0 && refseq.apply_square(self.p1.0).rank() != 7 {
+                for target in targets.squares() {
+                    out.add(RevMove::new(refseq.apply_square(target), Some(Piece::BlackPawn), MovingPiece::P1, false, false).with_reflection(refseq));
+                }
             }
         }
         let rank = self.p1.0.rank();
@@ -798,7 +819,7 @@ impl Pos {
                 panic!("shouldn't be unkown");
             }
             let revmovelist = pos.make_revmovelist();
-            let mut seen_hashes: [u64; 255] = [0; 255];
+            let mut seen_hashes: [u64; MAX_REV_MOVES] = [0; MAX_REV_MOVES];
             let mut seen_len: usize = 0;
             for i in 0..revmovelist.length {
                 let revmove = revmovelist.list[i];
@@ -1517,9 +1538,15 @@ mod tests {
         let wrong = our.is_win() != syzygy_win || our.is_loss() != syzygy_loss;
         eprintln!("{prefix}{} ours={} syzygy={:?} {}", pos_str(pos), our.0, wdl,
             if wrong { "WRONG" } else { "ok" });
-        if !wrong || depth >= 50 { return; }
-        let mut first_loss_mv = None;   // for wrong-Win: follow the syzygy-Loss child
-        let mut first_not_win_mv = None; // for wrong-Loss: follow the first child our EGTB doesn't mark as Win
+        if !wrong { return; }
+        // Among wrong children of the optimal type, pick the one with highest DTZ,
+        // skipping any already in `visited` to break cycles.
+        //   Win position → wrong Loss child with max DTZ (least negative = fastest win)
+        //   Loss position → wrong Win child with max DTZ (most positive = slowest opponent win = best defense)
+        let mut best_mv: Option<shakmaty::Move> = None;
+        let mut best_child_pos: Option<Option<Pos>> = None;
+        let mut best_dtz = i32::MIN;
+        let mut found_wrong_candidate = false;
         for mv in chess.legal_moves() {
             let mut child_chess = chess.clone();
             child_chess.play_unchecked(&mv);
@@ -1527,32 +1554,33 @@ mod tests {
                 Ok(w) => w,
                 Err(e) => { eprintln!("{prefix}  mv={mv} syzygy_err={e:?}"); continue; }
             };
+            let child_dtz = syzygy.probe_dtz(&child_chess)
+                .map(|d| d.ignore_rounding().0)
+                .unwrap_or(i32::MIN);
             let child_pos = chess_to_pos(&child_chess);
             let child_our = child_pos.as_ref().map_or(Status(0), |p| probe(p));
             let child_syzygy_win  = matches!(child_wdl, Wdl::Win | Wdl::CursedWin);
             let child_syzygy_loss = matches!(child_wdl, Wdl::Loss | Wdl::BlessedLoss);
             let child_wrong = child_our.is_win() != child_syzygy_win || child_our.is_loss() != child_syzygy_loss;
-            eprintln!("{prefix}  mv={mv} ours={} syzygy={:?}{}", child_our.0, child_wdl,
+            eprintln!("{prefix}  mv={mv} ours={} syzygy={:?} dtz={child_dtz}{}", child_our.0, child_wdl,
                 if child_wrong { " WRONG" } else { "" });
-            if child_syzygy_loss && first_loss_mv.is_none() && child_pos.as_ref().map_or(true, |p| !visited.contains(&p.pos_hash())) {
-                first_loss_mv = Some((mv.clone(), child_pos.clone()));
+            let already_visited = child_pos.as_ref().map_or(false, |p| visited.contains(&p.pos_hash()));
+            let is_candidate = ((syzygy_win && child_syzygy_loss) || (syzygy_loss && child_syzygy_win))
+                && child_wrong && !already_visited;
+            if (syzygy_win && child_syzygy_loss || syzygy_loss && child_syzygy_win) && child_wrong {
+                found_wrong_candidate = true;
             }
-            if syzygy_loss && !child_our.is_win() && first_not_win_mv.is_none() && child_pos.as_ref().map_or(true, |p| !visited.contains(&p.pos_hash())) {
-                first_not_win_mv = Some((mv, child_pos));
+            if is_candidate && child_dtz > best_dtz {
+                best_dtz = child_dtz;
+                best_mv = Some(mv);
+                best_child_pos = Some(child_pos);
             }
         }
-        let to_trace = if syzygy_win {
-            first_loss_mv
-        } else if syzygy_loss {
-            if first_not_win_mv.is_none() {
-                eprintln!("{prefix}  (all children correctly Win in our EGTB - retrograde propagation bug)");
-            }
-            first_not_win_mv
-        } else {
-            None
-        };
-        if let Some((mv, Some(child_pos))) = to_trace {
-            eprintln!("{prefix}-> tracing {mv}:");
+        if !found_wrong_candidate {
+            eprintln!("{prefix}  (all optimal children correctly evaluated — retrograde propagation bug)");
+        }
+        if let (Some(mv), Some(Some(child_pos))) = (best_mv, best_child_pos) {
+            eprintln!("{prefix}-> tracing {mv} (dtz={best_dtz}):");
             trace_wrong(&child_pos, syzygy, depth + 1, visited);
         }
     }
@@ -1634,13 +1662,25 @@ mod tests {
     fn test_retrograde_trace_kpkp() {
         let (mut moves_left, _, _) = Pos::init_backwards_gen();
 
-        // WK=d2 BK=d5 WQ=e1 BQ=b1 lm=w — canonical KQKQ after queen promotion (black to move), status=0
-        let failing = Pos {
-            king: [Square::d2, Square::d5],
-            p1: (Square::e1, Piece::WhiteQueen),
-            p2: Some((Square::b1, Piece::BlackQueen)),
-            last_moved: Colour::White,
-        };
+        // Terminal positions from trace_wrong:
+        // WK=d5 BK=g2 Qe3 pe2 lm=w — syzygy=Loss, ours=0 (retrograde propagation bug leaf)
+        // WK=d5 BK=f1 Qe3 pe2 lm=b — syzygy=Win, ours=0 (its predecessor via Kg2-f1)
+        let positions = [
+            Pos {
+                king: [Square::d5, Square::g2],
+                p1: (Square::e3, Piece::WhiteQueen),
+                p2: Some((Square::e2, Piece::BlackPawn)),
+                last_moved: Colour::White,
+            },
+            Pos {
+                king: [Square::d5, Square::f1],
+                p1: (Square::e3, Piece::WhiteQueen),
+                p2: Some((Square::e2, Piece::BlackPawn)),
+                last_moved: Colour::Black,
+            },
+        ];
+        for failing in &positions {
+        let failing = failing.clone();
 
         eprintln!("\n=== Failing KPKP: {} ===", failing.to_board_partial().to_fen());
         let ml = *failing.index_file(&mut moves_left, u8::MAX);
@@ -1671,6 +1711,7 @@ mod tests {
             i += 1;
         }
         eprintln!("  total moves (incl R/B proms): {}", movelist.length);
+        } // end for failing in &positions
 
         assert!(false, "diagnostic complete — see output above");
     }
