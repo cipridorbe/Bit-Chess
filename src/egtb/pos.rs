@@ -1088,7 +1088,7 @@ impl Pos {
 pub struct Status(pub i8);
 
 impl Status {
-    const UNKOWN: Self = Self(i8::MAX);
+    pub const UNKOWN: Self = Self(i8::MAX);
     const DRAW: Self = Self(0);
     const CHECKMATED: Self = Self(-1);
 

@@ -3,6 +3,7 @@ use crate::repr::square::Square;
 pub mod reflections;
 pub mod pos;
 pub mod revmove;
+pub mod compression;
 
 
 // [white king][black king]
