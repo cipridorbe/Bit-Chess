@@ -4,3 +4,5 @@
 /logs
 /baselines
 tablebase
+/syzygy
+/vendor
