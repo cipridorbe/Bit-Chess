@@ -1,14 +1,16 @@
 use std::{collections::VecDeque, io::{BufReader, BufWriter, Read, Write}, u8};
 use crate::{egtb::revmove::MAX_REV_MOVES, test_assert};
 
-use crate::{egtb::{KINGS_IDX_PAWNFUL, KINGS_IDX_PAWNLESS, reflections::{DIAGONAL, HORIZONTAL, VERTICAL, ReflectionSequence}, revmove::{MovingPiece, RevMove, RevMoveList}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, tables::KING_ATTACKS}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}};
+use crate::{egtb::{KINGS_IDX_PAWNFUL, KINGS_IDX_PAWNLESS, NUM_KINGS_PAWNFUL, NUM_KINGS_PAWNLESS, reflections::{DIAGONAL, HORIZONTAL, VERTICAL, ReflectionSequence}, revmove::{MovingPiece, RevMove, RevMoveList}}, movegen::{attacks::{pawn_attacks, single_bishop_attacks, single_knight_attacks, single_queen_attacks, single_rook_attacks}, tables::KING_ATTACKS}, repr::{bitboard::BB, board::{Board, BoardState}, castling::CastlingRights, colour::Colour, hash::Hash, piece::{Piece, PieceType}, square::{SEGMENT, SEGMENT_CARDINAL, SEGMENT_DIAGONAL, Square}}};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Pos {
     king: [Square; 2],
     p1: (Square, Piece),
     p2: Option<(Square, Piece)>,
-    last_moved: Colour
+    last_moved: Colour,
+    // last_moved's own pawn just double-pushed and an enemy pawn is adjacent on the same rank
+    ep: bool,
 }
 
 impl ReflectionSequence {
@@ -32,18 +34,23 @@ impl Pos {
             panic!("Too many pieces remain");
         }
 
+        let last_moved = !board.colour;
+        let ep = board.enpassant.map_or(false, |ep_sq| {
+            pawn_attacks(ep_sq.bb(), !last_moved) & board[Piece::pawn(!last_moved)] != BB::new(0)
+        });
+
         let mut pos = if remaining.count_ones() == 1 {
             let p1 = (remaining.lsb(), board[remaining.lsb()].unwrap());
-            Pos { king, p1, p2: None, last_moved: !board.colour }
+            Pos { king, p1, p2: None, last_moved, ep }
         } else {
             let lsb1 = remaining.pop_lsb();
             let p1 = (lsb1, board[lsb1].unwrap());
             let lsb2 = remaining.lsb();
             let p2 = (lsb2, board[lsb2].unwrap());
             if p1.1.abs_regular_value() >= p2.1.abs_regular_value() {
-                Pos { king, p1: p1, p2: Some(p2), last_moved: !board.colour }
+                Pos { king, p1: p1, p2: Some(p2), last_moved, ep }
             } else {
-                Pos { king, p1: p2, p2: Some(p1), last_moved: !board.colour }
+                Pos { king, p1: p2, p2: Some(p1), last_moved, ep }
             }
         };
         if pos.p1.1.colour() == Colour::Black {
@@ -78,6 +85,21 @@ impl Pos {
         ))
     }
 
+    // true iff a pawn on sq_a and a pawn on sq_b sit adjacent on the same rank,
+    // i.e. either could capture the other en passant if it just double-pushed there
+    fn ep_geometry(sq_a: Square, sq_b: Square, rank: u8) -> bool {
+        sq_a.rank() == rank && sq_b.rank() == rank && sq_a.file().abs_diff(sq_b.file()) == 1
+    }
+
+    // adds `revmove`, plus a second copy forced to ep=true when `fork` holds --
+    // used where the predecessor is ambiguous between "just double-pushed" and not
+    fn add_revmove_maybe_forked(out: &mut RevMoveList, target: Square, uncaptured: Option<Piece>, moving: MovingPiece, fork: bool) {
+        out.add(RevMove::new(target, uncaptured, moving, false, false));
+        if fork {
+            out.add(RevMove::new(target, uncaptured, moving, false, true));
+        }
+    }
+
     pub fn reflect(&mut self, table: [Square; 64]) {
         self.king = [table[self.king[0]], table[self.king[1]]];
         self.p1.0 = table[self.p1.0];
@@ -97,16 +119,20 @@ impl Pos {
         if self.last_moved == Colour::White {
             h ^= Hash::SIDE_HASH.0;
         }
+        if self.ep {
+            let file = if self.last_moved == Colour::White { self.p1.0.file() } else { self.p2.unwrap().0.file() };
+            h ^= Hash::ENPASSANT_HASH[file as usize].0;
+        }
         h
     }
 
     fn canonical_key(&self) -> (u8, u8, u8, u8, u8) {
         (
+            !self.last_moved as u8,
             self.king[0] as u8,
             self.king[1] as u8,
             self.p1.0 as u8,
             self.p2.map(|p| p.0 as u8).unwrap_or(255),
-            self.last_moved as u8,
         )
     }
 
@@ -286,20 +312,102 @@ impl Pos {
         } else {
             KINGS_IDX_PAWNLESS[self.king[Colour::White] as usize][self.king[Colour::Black]]
         } as usize;
+        let side = !self.last_moved as usize;
+        let wk = self.king[Colour::White] as u8;
+        let bk = self.king[Colour::Black] as u8;
+
         if self.p2.is_none() {
             if self.p1.1 == Piece::WhitePawn {
-                return king_idx * 48 * 2 + (self.p1.0 as usize - 8) * 2 + !self.last_moved as usize;
+                // Pawn: never compacted by the kings -- a king isn't guaranteed to
+                // fall within ranks 1-6, so the 48-wide range can't be safely shrunk.
+                let sq = self.p1.0 as usize - 8;
+                return side * (NUM_KINGS_PAWNFUL * 48) + king_idx * 48 + sq;
             } else {
-                return king_idx * 64 * 2 + self.p1.0 as usize * 2 + !self.last_moved as usize;
+                // Non-pawn: both king squares are always distinct from p1's square
+                // and always fall somewhere in 0..64, so this is always safe.
+                let raw = self.p1.0 as u8;
+                let compact = raw as usize - (raw > wk) as usize - (raw > bk) as usize;
+                return side * (NUM_KINGS_PAWNLESS * 62) + king_idx * 62 + compact;
             }
         }
-        let sq1 = self.p1.0 as usize;
-        let sq2 = self.p2.unwrap().0 as usize;
-        return match (self.p1.1.to_white(), self.p2.unwrap().1.to_white()) {
-            (Piece::WhitePawn, Piece::WhitePawn) => king_idx * 48 * 48 * 2 + (sq1 - 8) * 48 * 2 + (sq2 - 8) * 2 + !self.last_moved as usize,
-            (Piece::WhitePawn, _) => king_idx * 48 * 64 * 2 + (sq1 - 8) * 64 * 2 + sq2 * 2 + !self.last_moved as usize,
-            (_, Piece::WhitePawn) => king_idx * 64 * 48 * 2 + sq1 * 48 * 2 + (sq2 - 8) * 2 + !self.last_moved as usize,
-            (_, _) => king_idx * 64 * 64 * 2 + sq1 * 64 * 2 + sq2 * 2 + !self.last_moved as usize
+
+        let sq1_raw = self.p1.0 as u8;
+        let sq2_raw = self.p2.unwrap().0 as u8;
+        match (self.p1.1.to_white(), self.p2.unwrap().1.to_white()) {
+            (Piece::WhitePawn, Piece::WhitePawn) => {
+                // p1 (pawn) is never king-compacted, same reasoning as onepiece.
+                let p1c = self.p1.0 as usize - 8;
+                // p2 is also a pawn here, so it's always safe to compact away p1's
+                // square too (p1 is guaranteed to be somewhere in ranks 1-6, distinct
+                // from p2) -- but still never compacted by the kings.
+                let p2_off = self.p2.unwrap().0 as usize - 8;
+                let p2c = p2_off - (p2_off > p1c) as usize;
+                const P1_RANGE: usize = 48;
+                const P2_RANGE: usize = 47;
+                const BASE_SIZE: usize = P1_RANGE * P2_RANGE;
+                const EP_EXTRA_PER_SIDE: usize = 16;
+                if self.p2.unwrap().1 == Piece::WhitePawn {
+                    // p2 is the identical piece to p1 (both WhitePawn): correct_reflection
+                    // guarantees p1.0 <= p2.0 for identical pieces, which (since the p1c/p2c
+                    // compaction above is order-preserving) means p1c <= p2c always holds
+                    // too -- so half of the rectangular P1_RANGE*P2_RANGE grid can never
+                    // occur. Use a triangular index instead to not waste that space.
+                    const N: usize = P2_RANGE; // p2c's range; p1c <= p2c so p1c is also < N
+                    const TRI_SIZE: usize = N * (N + 1) / 2;
+                    let tri = p1c * N - (p1c * p1c - p1c) / 2 + (p2c - p1c);
+                    side * (NUM_KINGS_PAWNFUL * TRI_SIZE) + king_idx * TRI_SIZE + tri
+                } else if !self.ep {
+                    // p2 == BlackPawn (opposite-colour pawn, en-passant-relevant file).
+                    side * (NUM_KINGS_PAWNFUL * (BASE_SIZE + EP_EXTRA_PER_SIDE))
+                        + king_idx * (BASE_SIZE + EP_EXTRA_PER_SIDE) + p1c * P2_RANGE + p2c
+                } else {
+                    let file1 = self.p1.0.file() as usize;
+                    let file2 = self.p2.unwrap().0.file() as usize;
+                    let dir = (file2 > file1) as usize;
+                    side * (NUM_KINGS_PAWNFUL * (BASE_SIZE + EP_EXTRA_PER_SIDE))
+                        + king_idx * (BASE_SIZE + EP_EXTRA_PER_SIDE) + BASE_SIZE + file1 * 2 + dir
+                }
+            },
+            (Piece::WhitePawn, _) => {
+                // p1 (pawn): uncompacted. p2 (non-pawn, full board): always safe to
+                // compact by both kings and p1 (p1 is somewhere in 0..64 regardless
+                // of its own rank restriction).
+                let p1c = self.p1.0 as usize - 8;
+                let p2c = sq2_raw as usize
+                    - (sq2_raw > wk) as usize - (sq2_raw > bk) as usize - (sq2_raw > sq1_raw) as usize;
+                const P1_RANGE: usize = 48;
+                const P2_RANGE: usize = 61;
+                side * (NUM_KINGS_PAWNFUL * P1_RANGE * P2_RANGE) + king_idx * (P1_RANGE * P2_RANGE) + p1c * P2_RANGE + p2c
+            },
+            (_, Piece::WhitePawn) => {
+                // p1 (non-pawn): compact by kings. p2 (pawn): p1 is NOT guaranteed to
+                // fall within ranks 1-6 (it could be on rank 0/7), so p2 can't safely
+                // be compacted by it -- only the kings' guarantee would apply here,
+                // and kings aren't guaranteed in-range either, so p2 stays uncompacted.
+                let p1c = sq1_raw as usize - (sq1_raw > wk) as usize - (sq1_raw > bk) as usize;
+                let p2c = self.p2.unwrap().0 as usize - 8;
+                const P1_RANGE: usize = 62;
+                const P2_RANGE: usize = 48;
+                side * (NUM_KINGS_PAWNFUL * P1_RANGE * P2_RANGE) + king_idx * (P1_RANGE * P2_RANGE) + p1c * P2_RANGE + p2c
+            },
+            (_, _) => {
+                let p1c = sq1_raw as usize - (sq1_raw > wk) as usize - (sq1_raw > bk) as usize;
+                let p2c = sq2_raw as usize
+                    - (sq2_raw > wk) as usize - (sq2_raw > bk) as usize - (sq2_raw > sq1_raw) as usize;
+                if self.p1.1 == self.p2.unwrap().1 {
+                    // p1 and p2 are the exact same piece (e.g. WhiteKnight+WhiteKnight):
+                    // same triangular argument as the identical-pawns case above -- p1c <=
+                    // p2c always holds, so use a triangular index over the rectangular one.
+                    const N: usize = 61; // p2c's range; p1c <= p2c so p1c is also < N
+                    const TRI_SIZE: usize = N * (N + 1) / 2;
+                    let tri = p1c * N - (p1c * p1c - p1c) / 2 + (p2c - p1c);
+                    side * (NUM_KINGS_PAWNLESS * TRI_SIZE) + king_idx * TRI_SIZE + tri
+                } else {
+                    const P1_RANGE: usize = 62;
+                    const P2_RANGE: usize = 61;
+                    side * (NUM_KINGS_PAWNLESS * P1_RANGE * P2_RANGE) + king_idx * (P1_RANGE * P2_RANGE) + p1c * P2_RANGE + p2c
+                }
+            }
         }
     }
 
@@ -354,6 +462,8 @@ impl Pos {
             }
         }
 
+        self.ep = revmove.is_unenpassant();
+
         if self.p2.unwrap().1.abs_regular_value() > self.p1.1.abs_regular_value() {
             let tmp = self.p1;
             self.p1 = self.p2.unwrap();
@@ -404,16 +514,24 @@ impl Pos {
             MovingPiece::P2 => panic!("Should not have p2"),
         };
 
-        if revmove.is_unenpassant() {
+        if revmove.is_unenpassant() && moving == MovingPiece::P1 {
+            // true en-passant-capture-undo: the surviving pawn (P1) itself just captured;
+            // the restored pawn reappears one rank behind `from`, not at `from` itself.
             let new_piece = revmove.uncaptured_piece().unwrap();
             let new_square = match self.last_moved {
                 Colour::White => Square::from_u8(from as u8 - 8),
                 Colour::Black => Square::from_u8(from as u8 + 8),
             };
             self.p2 = Some((new_square, new_piece));
+            self.ep = true;
         } else if revmove.is_uncapture() {
+            // regular uncapture (king or piece move); is_unenpassant() here just means
+            // "fork: this restored pawn also happens to make ep=true possible".
             let new_piece = revmove.uncaptured_piece().unwrap();
             self.p2 = Some((from, new_piece));
+            self.ep = revmove.is_unenpassant();
+        } else {
+            self.ep = false;
         }
 
         if self.p2.is_some() {
@@ -476,9 +594,16 @@ impl Pos {
                 }
             }
         } else {
+            // If p1 is a WhitePawn sitting adjacent (same rank) to the king's own square,
+            // restoring a BlackPawn here at `from` (the king's current square) can create
+            // an ep-eligible predecessor; fork that specific uncapture into an extra ep=true variant.
+            let ep_fork = self.p1.1 == Piece::WhitePawn && Self::ep_geometry(self.p1.0, self.king[Colour::White], 4);
             for target in king_targets.squares() {
                 for uncaptured in RevMove::BLACK {
                     out.add(RevMove::new(target, uncaptured, MovingPiece::WhiteKing, false, false));
+                    if ep_fork && uncaptured == Some(Piece::BlackPawn) {
+                        out.add(RevMove::new(target, uncaptured, MovingPiece::WhiteKing, false, true));
+                    }
                 }
             }
         }
@@ -511,6 +636,13 @@ impl Pos {
                 for uncaptured in RevMove::BLACK {
                     if uncaptured == None { continue; }
                     out.add(RevMove::new(target, uncaptured, MovingPiece::P1, false, false));
+                }
+                if self.p1.0.rank() == 5 {
+                    let ep_square = Square::from_u8(self.p1.0 as u8 - 8);
+                    let origin_square = Square::from_u8(self.p1.0 as u8 + 8);
+                    if ep_square.bb() & occupied == 0 && origin_square.bb() & occupied == 0 {
+                        out.add(RevMove::new(target, Some(Piece::BlackPawn), MovingPiece::P1, false, true));
+                    }
                 }
             }
             return out;
@@ -590,6 +722,24 @@ impl Pos {
         let p1 = self.p1;
         let p2 = self.p2.unwrap();
         let occupied = self.king[0].bb() | self.king[1] | p1.0 | p2.0;
+        let ep_relevant = p1.1 == Piece::WhitePawn && p2.1 == Piece::BlackPawn;
+
+        if ep_relevant && self.ep {
+            // last_moved's own pawn just double-pushed with an adjacent enemy pawn present:
+            // the only possible predecessor move is undoing that double push. back2 always
+            // lands on the pawn's home rank, which can never be the other pawn's ep rank,
+            // so this predecessor never forks.
+            let (back, back2, moving) = match colour {
+                Colour::White => (Square::from_u8(p1.0 as u8 - 8), Square::from_u8(p1.0 as u8 - 16), MovingPiece::P1),
+                Colour::Black => (Square::from_u8(p2.0 as u8 + 8), Square::from_u8(p2.0 as u8 + 16), MovingPiece::P2),
+            };
+            if (back.bb() | back2.bb()) & occupied != 0 {
+                return out;
+            }
+            out.add(RevMove::new(back2, None, moving, false, false));
+            return out;
+        }
+
         if colour == Colour::Black {
             let king = self.king[Colour::Black];
             let mut targets = KING_ATTACKS[king] & !occupied & !KING_ATTACKS[self.king[Colour::White]];
@@ -599,8 +749,9 @@ impl Pos {
             if p2.1 == Piece::WhitePawn && p2.0.rank() == 1 {
                 targets &= !pawn_attacks(p2.0.bb(), Colour::White);
             }
+            let fork = ep_relevant && Self::ep_geometry(p1.0, p2.0, 3);
             for target in targets.squares() {
-                out.add(RevMove::new(target, None, MovingPiece::BlackKing, false, false));
+                Self::add_revmove_maybe_forked(&mut out, target, None, MovingPiece::BlackKing, fork);
             }
         } else {
             let king = self.king[Colour::White];
@@ -608,17 +759,21 @@ impl Pos {
             if p2.1 == Piece::BlackPawn && p2.0.rank() == 6 {
                 targets &= !pawn_attacks(p2.0.bb(), Colour::Black);
             }
+            let king_fork = ep_relevant && Self::ep_geometry(p1.0, p2.0, 4);
             for target in targets.squares() {
-                out.add(RevMove::new(target, None, MovingPiece::WhiteKing, false, false));
+                Self::add_revmove_maybe_forked(&mut out, target, None, MovingPiece::WhiteKing, king_fork);
             }
             if p1.1 == Piece::WhitePawn && p1.0.rank() > 1 {
                 let back = Square::from_u8(p1.0 as u8 - 8);
                 if back & occupied == 0 && pawn_attacks(back.bb(), Colour::White) & self.king[Colour::Black] == 0 {
-                    out.add(RevMove::new(back, None, MovingPiece::P1, false, false));
+                    let fork = ep_relevant && Self::ep_geometry(back, p2.0, 4);
+                    Self::add_revmove_maybe_forked(&mut out, back, None, MovingPiece::P1, fork);
                 }
-                let back2 = Square::from_u8(p1.0 as u8 - 16);
-                if (back.bb() | back2.bb()) & occupied == 0 && pawn_attacks(back2.bb(), Colour::White) & self.king[Colour::Black] == 0 && back2.rank() == 1 {
-                    out.add(RevMove::new(back2, None, MovingPiece::P1, false, false));
+                if !ep_relevant || !Self::ep_geometry(p1.0, p2.0, 3) {
+                    let back2 = Square::from_u8(p1.0 as u8 - 16);
+                    if (back.bb() | back2.bb()) & occupied == 0 && pawn_attacks(back2.bb(), Colour::White) & self.king[Colour::Black] == 0 && back2.rank() == 1 {
+                        out.add(RevMove::new(back2, None, MovingPiece::P1, false, false));
+                    }
                 }
             } else if p1.1 != Piece::WhitePawn {
                 let targets = self.p1_attacks() & !occupied;
@@ -659,14 +814,17 @@ impl Pos {
                     Colour::Black => Square::from_u8(p2.0 as u8 + 8),
                 };
                 if back & occupied == 0 {
-                    out.add(RevMove::new(back, None, MovingPiece::P2, false, false));
+                    let fork = ep_relevant && Self::ep_geometry(p1.0, back, 3);
+                    Self::add_revmove_maybe_forked(&mut out, back, None, MovingPiece::P2, fork);
                 }
-                let back2 = match colour {
-                    Colour::White => Square::from_u8(p2.0 as u8 - 16),
-                    Colour::Black => Square::from_u8(p2.0 as u8 + 16),
-                };
-                if (back.bb() | back2) & occupied == 0 && (back2.rank() == 1 || back2.rank() == 6)  {
-                    out.add(RevMove::new(back2, None, MovingPiece::P2, false, false));
+                if !ep_relevant || !Self::ep_geometry(p1.0, p2.0, 4) {
+                    let back2 = match colour {
+                        Colour::White => Square::from_u8(p2.0 as u8 - 16),
+                        Colour::Black => Square::from_u8(p2.0 as u8 + 16),
+                    };
+                    if (back.bb() | back2) & occupied == 0 && (back2.rank() == 1 || back2.rank() == 6)  {
+                        out.add(RevMove::new(back2, None, MovingPiece::P2, false, false));
+                    }
                 }
             } else if p2.1 != Piece::WhitePawn && p2.1 != Piece::BlackPawn {
                 let targets = self.p2_attacks().unwrap() & !occupied;
@@ -751,6 +909,13 @@ impl Pos {
             }
         };
         out.colour = !self.last_moved;
+        if self.ep {
+            out.enpassant = Some(if self.last_moved == Colour::White {
+                Square::from_u8(self.p1.0 as u8 - 8)
+            } else {
+                Square::from_u8(self.p2.unwrap().0 as u8 + 8)
+            });
+        }
         out[Piece::WhiteKing] = self.king[Colour::White].bb();
         out[self.king[Colour::White]] = Some(Piece::WhiteKing);
         out[Piece::BlackKing] = self.king[Colour::Black].bb();
@@ -803,15 +968,34 @@ impl Pos {
     }
 
     pub fn generator() -> [Vec<Status>; 100] {
+        Self::generator_impl(true)
+    }
+
+    pub fn generator_untrimmed() -> [Vec<Status>; 100] {
+        Self::generator_impl(false)
+    }
+
+    fn generator_impl(trim: bool) -> [Vec<Status>; 100] {
         let (mut moves_left, mut status, mut queue) = Self::init_backwards_gen();
         #[cfg(feature = "assertions")]
         let mut debug_target_predecessors: Vec<(Pos, RevMove, u8)> = Vec::new();
+        #[cfg(feature = "assertions")]
+        let mut ep_target_predecessors: Vec<(Pos, RevMove, u8)> = Vec::new();
+        #[cfg(feature = "assertions")]
+        let ep_target = Pos {
+            king: [Square::c1, Square::a1],
+            p1: (Square::d5, Piece::WhitePawn),
+            p2: Some((Square::c7, Piece::BlackPawn)),
+            last_moved: Colour::White,
+            ep: false,
+        };
         #[cfg(feature = "assertions")]
         let kqkb_target = Pos {
             king: [Square::a1, Square::c2],
             p1: (Square::d4, Piece::WhiteQueen),
             p2: Some((Square::b1, Piece::BlackBishop)),
             last_moved: Colour::White,
+            ep: false,
         };
         while let Some(pos) = queue.pop_front() {
             let state = *pos.index_file(&mut status, Status::UNKOWN);
@@ -859,6 +1043,17 @@ impl Pos {
                         && next.last_moved == Colour::White;
                     if is_debug_target {
                         debug_target_predecessors.push((pos.clone(), revmove, *left));
+                    }
+                    let is_ep_target = next == ep_target;
+                    if is_ep_target {
+                        ep_target_predecessors.push((pos.clone(), revmove, *left));
+                        eprintln!("EP TARGET DECREMENT #{}: left_before={} (from pos {} lm={} ep={} state={})",
+                            ep_target_predecessors.len(),
+                            *left,
+                            pos.to_board_partial().to_fen(),
+                            pos.last_moved.to_fen(),
+                            pos.ep,
+                            state.0);
                     }
                     // Track what generates pred2 (should be impossible after correct_reflection)
                     let is_pred2 = next.king[0] == Square::d4
@@ -917,6 +1112,21 @@ impl Pos {
                                     left_at_time);
                             }
                         }
+                        if is_ep_target {
+                            eprintln!("  --- all {} predecessors of ep_target before this underflow ---", ep_target_predecessors.len());
+                            for (pred, pred_rm, left_at_time) in &ep_target_predecessors {
+                                eprintln!("    pred fen: {}  pred.ep={} revmove: to={} moving={:?} unprom={} diag={} uncap={:?} flag={:08b} left_was={}",
+                                    pred.to_board_partial().to_fen(),
+                                    pred.ep,
+                                    pred_rm.to.to_fen(),
+                                    pred_rm.moving_piece(),
+                                    pred_rm.is_unpromotion(),
+                                    pred_rm.unpromote_diagonal(),
+                                    pred_rm.uncaptured_piece(),
+                                    pred_rm.flag,
+                                    left_at_time);
+                            }
+                        }
                         panic!("spurious revmove");
                     }
                 }
@@ -944,17 +1154,32 @@ impl Pos {
                 }
             }
         }
-        for i in 0..status.len() {
-            let mut true_len = 0;
-            for j in (0..status[i].len()).rev() {
-                if status[i][j] == Status::UNKOWN || status[i][j] == Status::DRAW {
-                    continue;
+        if trim {
+            for i in 0..status.len() {
+                let mut true_len = 0;
+                for j in (0..status[i].len()).rev() {
+                    if status[i][j] == Status::UNKOWN || status[i][j] == Status::DRAW {
+                        continue;
+                    }
+                    true_len = j + 1;
+                    break;
                 }
-                true_len = j + 1;
-                break;
+                unsafe { status[i].set_len(true_len); }
+                status[i].shrink_to_fit();
             }
-            unsafe { status[i].set_len(true_len); }
-            status[i].shrink_to_fit();
+        } else {
+            // moves_left was resized to fit every position `init_backwards_gen`
+            // enumerated (unconditionally, for every combination), so its length is
+            // the true theoretical extent of each file; pad status out to match.
+            for i in 0..status.len() {
+                if status[i].len() < moves_left[i].len() {
+                    status[i].resize(moves_left[i].len(), Status::UNKOWN);
+                }
+                if status[i].iter().all(|&s| s == Status::UNKOWN || s == Status::DRAW) {
+                    status[i].clear();
+                }
+                status[i].shrink_to_fit();
+            }
         }
         status
     }
@@ -999,7 +1224,12 @@ impl Pos {
                                 let p1 = (square1, kind1);
                                 let p2 = kind2.map(|kind2| (square2, kind2));
                                 for last_moved in [Colour::White, Colour::Black] {
-                                    let mut pos = Pos { king, p1, p2, last_moved };
+                                    let ep_rank = if last_moved == Colour::White { 3 } else { 4 };
+                                    let ep_possible = kind1 == Piece::WhitePawn && kind2 == Some(Piece::BlackPawn)
+                                        && Self::ep_geometry(square1, square2, ep_rank);
+                                    let ep_options: &[bool] = if ep_possible { &[false, true] } else { &[false] };
+                                    for &ep in ep_options {
+                                    let mut pos = Pos { king, p1, p2, last_moved, ep };
                                     pos.correct_reflection();
                                     if pos.in_check_simple(pos.last_moved) {
                                         continue;
@@ -1016,6 +1246,7 @@ impl Pos {
                                                 pos.insert_to_file(&mut status, Status::DRAW, Status::UNKOWN);
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -1135,6 +1366,25 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
+    #[test]
+    fn triangular_index_formula_is_a_bijection() {
+        // Same formula used in index()'s identical-piece arms: tri = a*n - (a*a-a)/2 + (b-a)
+        // for 0 <= a <= b < n, should biject onto [0, n*(n+1)/2).
+        for n in [47usize, 61] {
+            let total = n * (n + 1) / 2;
+            let mut seen = vec![false; total];
+            for a in 0..n {
+                for b in a..n {
+                    let tri = a * n - (a * a - a) / 2 + (b - a);
+                    assert!(tri < total, "n={n} a={a} b={b} tri={tri} out of range {total}");
+                    assert!(!seen[tri], "n={n} a={a} b={b} tri={tri} collides with a previous pair");
+                    seen[tri] = true;
+                }
+            }
+            assert!(seen.iter().all(|&s| s), "n={n}: not all {total} slots were covered");
+        }
+    }
+
     static TB: OnceLock<[Vec<Status>; 100]> = OnceLock::new();
 
     fn tb() -> &'static [Vec<Status>; 100] {
@@ -1195,13 +1445,24 @@ mod tests {
             ByColor { white, black },
         );
 
+        let ep_square = if pos.ep {
+            let landing = if pos.last_moved == Colour::White { pos.p1.0 } else { pos.p2.unwrap().0 };
+            let target = match pos.last_moved {
+                Colour::White => landing as u8 - 8,
+                Colour::Black => landing as u8 + 8,
+            };
+            Some(shakmaty::Square::new(target as u32))
+        } else {
+            None
+        };
+
         let setup = Setup {
             board,
             promoted: Bitboard::EMPTY,
             pockets: None,
             turn: if pos.last_moved == Colour::White { Color::Black } else { Color::White },
             castling_rights: Bitboard::EMPTY,
-            ep_square: None,
+            ep_square,
             remaining_checks: None,
             halfmoves: 0,
             fullmoves: NonZeroU32::new(1).unwrap(),
@@ -1228,6 +1489,7 @@ mod tests {
             p1: (Square::b2, Piece::WhiteQueen),
             p2: None,
             last_moved: Colour::White,
+            ep: false,
         };
         assert_eq!(probe(&pos), Status::CHECKMATED);
     }
@@ -1239,6 +1501,7 @@ mod tests {
             p1: (Square::h2, Piece::WhiteQueen),
             p2: None,
             last_moved: Colour::Black,
+            ep: false,
         };
         assert_eq!(probe(&pos), Status(2));
     }
@@ -1250,6 +1513,7 @@ mod tests {
             p1: (Square::a8, Piece::WhiteRook),
             p2: None,
             last_moved: Colour::White,
+            ep: false,
         };
         assert_eq!(probe(&pos), Status::CHECKMATED);
     }
@@ -1317,10 +1581,14 @@ mod tests {
                                 }
                                 let p2 = kind2.map(|k| (square2, k));
                                 for last_moved in [Colour::White, Colour::Black] {
-                                    let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved };
+                                    let ep_rank = if last_moved == Colour::White { 3 } else { 4 };
+                                    let ep_possible = kind1 == Piece::WhitePawn && kind2 == Some(Piece::BlackPawn)
+                                        && Pos::ep_geometry(square1, square2, ep_rank);
+                                    let ep_options: &[bool] = if ep_possible { &[false, true] } else { &[false] };
+                                    for &ep in ep_options {
+                                    let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved, ep };
                                     pos.correct_reflection();
                                     if pos.in_check_simple(pos.last_moved) { continue; }
-                                    if ep_possible(&pos) { continue; }
 
                                     let our = probe(&pos);
                                     let t0 = std::time::Instant::now();
@@ -1353,13 +1621,14 @@ mod tests {
                                         if unreachable_pawn_check { continue; }
                                         mismatches += 1;
                                         if mismatches <= 20 {
-                                            eprintln!("MISMATCH  WK={} BK={} {}{} p2={}{} lm={}  ours={}  syzygy={:?}",
+                                            eprintln!("MISMATCH  WK={} BK={} {}{} p2={}{} lm={} ep={}  ours={}  syzygy={:?}",
                                                 white_king.to_fen(), black_king.to_fen(),
                                                 kind1.to_fen(), square1.to_fen(),
                                                 kind2.map_or("-".to_string(), |k| k.to_fen()),
                                                 kind2.map_or(String::new(), |_| square2.to_fen()),
-                                                last_moved.to_fen(), our.0, wdl);
+                                                last_moved.to_fen(), ep, our.0, wdl);
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -1405,10 +1674,9 @@ mod tests {
                                 if KINGS_IDX_PAWNLESS[white_king as usize][black_king] == u16::MAX { continue; }
                                 let p2 = kind2.map(|k| (square2, k));
                                 for last_moved in [Colour::White, Colour::Black] {
-                                    let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved };
+                                    let mut pos = Pos { king, p1: (square1, kind1), p2, last_moved, ep: false };
                                     pos.correct_reflection();
                                     if pos.in_check_simple(pos.last_moved) { continue; }
-                                    if ep_possible(&pos) { continue; }
 
                                     let t0 = std::time::Instant::now();
                                     let _our = probe(&pos);
@@ -1438,22 +1706,14 @@ mod tests {
         eprintln!("syzygy probe: {:>12?} total  ({:>8.1?} avg)", t_syzygy, t_syzygy / count as u32);
     }
 
-    fn ep_possible(pos: &Pos) -> bool {
-        let Some((sq2, pc2)) = pos.p2 else { return false; };
-        if pc2 != Piece::BlackPawn { return false; }
-        let (r1, f1) = pos.p1.0.rank_file();
-        let (r2, f2) = sq2.rank_file();
-        if f1.abs_diff(f2) != 1 { return false; }
-        (r1 == 1 && r2 >= 3) || (r2 == 6 && r1 <= 4)
-    }
-
     fn chess_to_pos(chess: &shakmaty::Chess) -> Option<Pos> {
-        use shakmaty::{Color, Position as ShakmPos, Role, Square as ShakmSquare};
+        use shakmaty::{Color, EnPassantMode, Position as ShakmPos, Role, Square as ShakmSquare};
         let board = chess.board();
         let last_moved = match chess.turn() {
             Color::White => Colour::Black,
             Color::Black => Colour::White,
         };
+        let ep = chess.ep_square(EnPassantMode::Legal).is_some();
         let our_sq = |s: ShakmSquare| -> Square { unsafe { std::mem::transmute::<u8, Square>(s as u8) } };
         let our_piece = |pc: shakmaty::Piece| -> Piece {
             match (pc.color, pc.role) {
@@ -1497,7 +1757,7 @@ mod tests {
         }
         let p1 = others[0];
         let p2 = others.get(1).copied();
-        let mut pos = Pos { king: [wk, bk], p1, p2, last_moved };
+        let mut pos = Pos { king: [wk, bk], p1, p2, last_moved, ep };
         if pos.p1.1.colour() == Colour::Black { pos.colour_swap(); }
         if let Some(p2v) = pos.p2 {
             if p2v.1.abs_regular_value() > pos.p1.1.abs_regular_value() {
@@ -1599,6 +1859,7 @@ mod tests {
             p1: (Square::b2, Piece::WhitePawn),
             p2: Some((Square::e7, Piece::BlackPawn)),
             last_moved: Colour::Black,
+            ep: false,
         };
         trace_wrong(&pos, &syzygy, 0, &mut std::collections::HashSet::new());
         assert!(false, "diagnostic complete");
@@ -1654,6 +1915,70 @@ mod tests {
     //   (2) final status of each forward successor — are they ever resolved by the BFS?
     //   (3) P ∈ succ.make_revmovelist()? — does the BFS ever see P as a predecessor of succ?
     //
+    #[test]
+    fn test_diagnose_black_ep_capture_mismatch() {
+        use shakmaty::Chess;
+        use shakmaty_syzygy::Tablebase;
+
+        // MISMATCH  WK=a1 BK=b5 Pc4 p2=pd4 lm=w ep=true  ours=0  syzygy=Win
+        // Black to move, can capture en passant (dxc3) removing White's pawn.
+        let next = Pos {
+            king: [Square::a1, Square::b5],
+            p1: (Square::c4, Piece::WhitePawn),
+            p2: Some((Square::d4, Piece::BlackPawn)),
+            last_moved: Colour::White,
+            ep: true,
+        };
+        eprintln!("next fen: {}", next.to_board_partial().to_fen());
+        eprintln!("next in_check_simple(mover)={}", next.in_check_simple(!next.last_moved));
+        eprintln!("count_distinct_canonical_successors = {}", next.count_distinct_canonical_successors());
+        eprintln!("probe(next) = {}", probe(&next).0);
+
+        // Forward->backward consistency: for every forward move from `next`, does the
+        // resulting successor's own revmovelist reconstruct `next`?
+        let mut board = next.to_board_partial();
+        eprintln!("board.enpassant = {}", board.enpassant.map_or("-".to_string(), |sq| sq.to_fen()));
+        let movelist = board.generate_movelist(false);
+        eprintln!("movelist.length={} queen_proms={} num_total_moves={}",
+            movelist.length, movelist.queen_proms, movelist.num_total_moves());
+        for i in 0..movelist.length {
+            let mv = movelist[i];
+            let unmake = board.makemove(mv);
+            let remaining = board.occupied() & !(board[Piece::WhiteKing] | board[Piece::BlackKing]);
+            if remaining.count_ones() == 0 {
+                eprintln!("  mv={} -> K-vs-K draw", mv.to_uci());
+                board.unmakemove(mv, unmake);
+                continue;
+            }
+            let succ = Pos::new(&board);
+            eprintln!("  mv={} -> succ: WK={} BK={} p1={}@{} p2={} lm={} ep={} probe={}",
+                mv.to_uci(),
+                succ.king[Colour::White].to_fen(), succ.king[Colour::Black].to_fen(),
+                succ.p1.1.to_fen(), succ.p1.0.to_fen(),
+                succ.p2.map_or("-".into(), |(sq, pc)| format!("{}@{}", pc.to_fen(), sq.to_fen())),
+                succ.last_moved.to_fen(), succ.ep, probe(&succ).0);
+            let revml = succ.make_revmovelist();
+            let mut found = false;
+            let mut found_count = 0;
+            for j in 0..revml.length {
+                let mut pred = succ.clone();
+                pred.make_revmove(revml.list[j]);
+                if pred.in_check_simple(pred.last_moved) { continue; }
+                if pred == next { found = true; found_count += 1; }
+            }
+            eprintln!("    revml.length={} next_found={found} found_count={found_count}", revml.length);
+            board.unmakemove(mv, unmake);
+        }
+
+        // Trace which specific move/position in the game tree diverges from Syzygy.
+        let syzygy: Tablebase<Chess> = {
+            let mut t = Tablebase::new(); t.add_directory("./syzygy/").unwrap(); t
+        };
+        trace_wrong(&next, &syzygy, 0, &mut std::collections::HashSet::new());
+
+        assert!(false, "diagnostic complete");
+    }
+
     // If (2) is ok but (3) is false → revmovelist generation skips P (root cause).
     // If (2) is false → the bug is deeper in that subtree.
     // If (1) is wrong → count_distinct_canonical_successors overcounts.
@@ -1671,12 +1996,14 @@ mod tests {
                 p1: (Square::e3, Piece::WhiteQueen),
                 p2: Some((Square::e2, Piece::BlackPawn)),
                 last_moved: Colour::White,
+                ep: false,
             },
             Pos {
                 king: [Square::d5, Square::f1],
                 p1: (Square::e3, Piece::WhiteQueen),
                 p2: Some((Square::e2, Piece::BlackPawn)),
                 last_moved: Colour::Black,
+                ep: false,
             },
         ];
         for failing in &positions {
@@ -1730,6 +2057,7 @@ mod tests {
             p1: (Square::f1, Piece::WhiteRook),
             p2: Some((Square::e1, Piece::BlackKnight)),
             last_moved: Colour::Black,
+            ep: false,
         };
         // The KRK position after WR captures BN: WK=a1, WR=e1, BK=c1, Black to move (lm=w)
         let krkn_capture_result = Pos {
@@ -1737,6 +2065,7 @@ mod tests {
             p1: (Square::e1, Piece::WhiteRook),
             p2: None,
             last_moved: Colour::White,
+            ep: false,
         };
 
         eprintln!("\n=== Failing KRKN: {} ===", failing.to_board_partial().to_fen());
@@ -1817,9 +2146,9 @@ mod tests {
 
         let roots: &[Pos] = &[
             // KRK — simplest failing case
-            Pos { king: [Square::a1, Square::c1], p1: (Square::b1, Piece::WhiteRook), p2: None, last_moved: Colour::White },
+            Pos { king: [Square::a1, Square::c1], p1: (Square::b1, Piece::WhiteRook), p2: None, last_moved: Colour::White, ep: false },
             // KRBK — also in the failure cluster
-            Pos { king: [Square::a1, Square::c1], p1: (Square::b1, Piece::WhiteRook), p2: Some((Square::d1, Piece::WhiteBishop)), last_moved: Colour::White },
+            Pos { king: [Square::a1, Square::c1], p1: (Square::b1, Piece::WhiteRook), p2: Some((Square::d1, Piece::WhiteBishop)), last_moved: Colour::White, ep: false },
         ];
 
         for p in roots {
@@ -1890,6 +2219,7 @@ mod tests {
             p1: (Square::a2, Piece::WhitePawn),
             p2: Some((Square::c2, Piece::BlackPawn)),
             last_moved: Colour::White,
+            ep: false,
         };
         let p_hash = failing.pos_hash();
 
@@ -1946,6 +2276,7 @@ mod tests {
             p1: (Square::a2, Piece::WhitePawn),
             p2: Some((Square::c2, Piece::BlackPawn)),
             last_moved: Colour::White,
+            ep: false,
         };
         let before_hash = before_prom.pos_hash();
         eprintln!("Before promotion: WK={} BK={} p1={}@{} p2={} lm={}",
@@ -1992,6 +2323,7 @@ mod tests {
             p1: (Square::c8, Piece::WhiteQueen),
             p2: Some((Square::a7, Piece::BlackPawn)),
             last_moved: Colour::White,
+            ep: false,
         };
 
         let mut after_reflect = pos.clone();
@@ -2068,6 +2400,7 @@ mod tests {
             p1: (Square::c1, Piece::WhiteRook),
             p2: Some((Square::b3, Piece::WhitePawn)),
             last_moved: Colour::White,
+            ep: false,
         };
         let mut original_reflected = original.clone();
         original_reflected.correct_reflection();
@@ -2118,6 +2451,7 @@ mod tests {
             p1: (Square::c1, Piece::WhiteRook),
             p2: None,
             last_moved: Colour::Black,
+            ep: false,
         };
         krk.correct_reflection();
         eprintln!("canonical KRK: WK={} BK={} WR={} lm={}",
@@ -2129,6 +2463,7 @@ mod tests {
             p1: (Square::c1, Piece::WhiteRook),
             p2: Some((Square::b3, Piece::WhitePawn)),
             last_moved: Colour::White,
+            ep: false,
         };
         eprintln!("target KRKP hash={} file_idx={} index={}", target.pos_hash(), target.file_idx(), target.index());
 
@@ -2161,6 +2496,7 @@ mod tests {
             p1: (Square::b1, Piece::WhiteKnight),
             p2: Some((Square::b2, Piece::WhitePawn)),
             last_moved: Colour::White,
+            ep: false,
         };
         let chess = pos_to_chess(&start).expect("valid pos");
         for mv in chess.legal_moves() {

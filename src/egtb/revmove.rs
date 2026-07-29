@@ -33,7 +33,10 @@ impl RevMove {
     }
 
     pub fn new(to: Square, uncaptured: Option<Piece>, moving_piece: MovingPiece, is_unpromotion: bool, is_unenpassant: bool) -> Self {
-        let mut flag: u8 = unsafe { std::mem::transmute(uncaptured) };
+        let mut flag: u8 = match uncaptured {
+            Some(p) => p as u8,
+            None => 12,
+        };
         flag |= (moving_piece as u8) << 4;
         if is_unpromotion { flag |= Self::PROM_MASK; }
         if is_unenpassant { flag |= Self::ENPASSANT_MASK; }
@@ -50,7 +53,10 @@ impl RevMove {
     }
 
     pub fn uncaptured_piece(self) -> Option<Piece> {
-        unsafe { std::mem::transmute(self.flag & Self::UNCAPTURE_MASK) }
+        match self.flag & Self::UNCAPTURE_MASK {
+            12 => None,
+            n => Some(unsafe { std::mem::transmute(n) }),
+        }
     }
 
     pub fn moving_piece(self) -> MovingPiece {

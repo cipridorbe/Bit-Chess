@@ -5,7 +5,6 @@ pub mod pos;
 pub mod revmove;
 pub mod compression;
 
-
 // [white king][black king]
 pub const KINGS_IDX_PAWNLESS: [[u16; 64]; 32] = {
     let mut out = [[u16::MAX; 64]; 32];
@@ -42,6 +41,22 @@ pub const KINGS_IDX_PAWNLESS: [[u16; 64]; 32] = {
     out
 };
 
+pub const NUM_KINGS_PAWNLESS: usize = {
+    let mut max = 0u16;
+    let mut i = 0;
+    while i < 64 {
+        let mut j = 0;
+        while j < 32 {
+            if KINGS_IDX_PAWNLESS[j][i] != u16::MAX && KINGS_IDX_PAWNLESS[j][i] + 1 > max {
+                max = KINGS_IDX_PAWNLESS[j][i] + 1;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    max as usize
+};
+
 // [white king][black king]
 pub const KINGS_IDX_PAWNFUL: [[u16; 64]; 64] = {
     let mut out = [[u16::MAX; 64]; 64];
@@ -72,4 +87,20 @@ pub const KINGS_IDX_PAWNFUL: [[u16; 64]; 64] = {
         _wk += 1;
     }
     out
+};
+
+pub const NUM_KINGS_PAWNFUL: usize = {
+    let mut max = 0u16;
+    let mut i = 0;
+    while i < 64 {
+        let mut j = 0;
+        while j < 64 {
+            if KINGS_IDX_PAWNFUL[j][i] != u16::MAX && KINGS_IDX_PAWNFUL[j][i] + 1 > max {
+                max = KINGS_IDX_PAWNFUL[j][i] + 1;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    max as usize
 };

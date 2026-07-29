@@ -46,7 +46,6 @@ fn generate_movelist(board: &Board, captures_only: bool) -> MoveList {
                         let mv = Move::new(Flag::ENPASSANT, enpassant, pawn);
                         if !enpassant_legal(board, mv, &pinned_moves) { continue; }
                         movelist.add(mv);
-                        movelist.enpassants += 1;
                     }
                 }
             }
@@ -190,7 +189,6 @@ fn generate_pawn_movelist(movelist: &mut MoveList, board: &Board, avoid: BB, cap
                 let mv = Move::new(Flag::ENPASSANT, enp_square, pawn);
                 if !enpassant_legal(board, mv, pinned_moves) { continue; }
                 movelist.add(mv);
-                movelist.enpassants += 1;
             }
         }
     }
