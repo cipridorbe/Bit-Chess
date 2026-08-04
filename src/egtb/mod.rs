@@ -4,6 +4,7 @@ pub mod reflections;
 pub mod pos;
 pub mod revmove;
 pub mod compression;
+pub mod threepiece;
 
 // [white king][black king]
 pub const KINGS_IDX_PAWNLESS: [[u16; 64]; 32] = {

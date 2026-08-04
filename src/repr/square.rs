@@ -45,7 +45,7 @@ impl Square {
     }
 
     /// Returns a bitboard with `self` set
-    pub fn bb(self) -> BB {
+    pub const fn bb(self) -> BB {
         BB::new(1 << self as u8)
     }
 

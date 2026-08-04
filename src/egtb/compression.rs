@@ -270,6 +270,34 @@ fn flatten_hybrid(tb: &[Vec<Status>; 100], sparsify: &[usize]) -> Vec<u8> {
     out
 }
 
+// Splits the flattened byte stream into two parallel streams, mirroring (in spirit,
+// not exact semantics -- our Status is DTM, not Syzygy's true DTZ) how real Syzygy/
+// Gaviota tablebases physically separate a small-alphabet result file from a magnitude
+// file: `class` has one entry per position (0=draw, 1=win, 2=loss), and `magnitude` has
+// one entry per *non-draw* position only (its absolute value), so it's shorter than the
+// original. Same total information as the combined stream, just reorganized into two
+// homogeneous streams instead of one interleaved one.
+fn split_class_magnitude(tb: &[Vec<Status>; 100]) -> (Vec<u8>, Vec<u8>) {
+    let total: usize = tb.iter().map(|f| f.len()).sum();
+    let mut class = Vec::with_capacity(total);
+    let mut magnitude = Vec::with_capacity(total / 2);
+    for file in tb.iter() {
+        for s in file.iter() {
+            let v = s.0;
+            if v == 0 {
+                class.push(0);
+            } else if v > 0 {
+                class.push(1);
+                magnitude.push(v as u8);
+            } else {
+                class.push(2);
+                magnitude.push(v.unsigned_abs());
+            }
+        }
+    }
+    (class, magnitude)
+}
+
 // STALE POST-INDEX-REDESIGN: this reordered a file so the side-to-move bit (the LSB of
 // the index, interleaved as [..., side0, side1, side0, side1, ...]) became the outermost
 // dimension -- a mechanical, index-agnostic approximation of "[side][kings][p1][p2]".
@@ -1342,6 +1370,29 @@ mod tests {
         let tb = load_replacing_unknowns("tablebase").expect("failed to load tablebase");
         println!("\n=== Trim-boundary isolation gap per file (files with gap > 1000 bytes shown) ===");
         print_trim_isolation(&tb);
+    }
+
+    #[test]
+    #[ignore]
+    fn class_magnitude_split_lzma_analysis() {
+        let tb = load_replacing_unknowns("tablebase").expect("failed to load tablebase");
+        let combined = flatten(&tb);
+        let (class, magnitude) = split_class_magnitude(&tb);
+        let raw = combined.len();
+
+        println!("\n=== Combined vs class/magnitude-split, LZMA preset 9 extreme ===");
+        println!("combined: {} bytes, class: {} bytes, magnitude: {} bytes (class+magnitude={})",
+            combined.len(), class.len(), magnitude.len(), class.len() + magnitude.len());
+
+        let combined_size = lzma_size(&combined, 9, true);
+        let class_size = lzma_size(&class, 9, true);
+        let magnitude_size = lzma_size(&magnitude, 9, true);
+        let split_size = class_size + magnitude_size;
+
+        println!("combined:            {} bytes ({:.2} MB, {:.2}x)", combined_size, mb(combined_size), raw as f64 / combined_size as f64);
+        println!("class stream alone:  {} bytes ({:.2} MB)", class_size, mb(class_size));
+        println!("magnitude stream alone: {} bytes ({:.2} MB)", magnitude_size, mb(magnitude_size));
+        println!("split total:         {} bytes ({:.2} MB, {:.2}x)", split_size, mb(split_size), raw as f64 / split_size as f64);
     }
 
     #[test]

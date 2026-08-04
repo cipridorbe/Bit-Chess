@@ -206,4 +206,8 @@ impl Piece {
             _ => panic!("Unexpected piece fen {}", fen)
         }
     }
+
+    pub fn is_pawn(self) -> bool {
+        self == Piece::WhitePawn || self == Piece::BlackPawn
+    }
 }
