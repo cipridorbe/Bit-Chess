@@ -6,3 +6,4 @@
 tablebase
 /syzygy
 /vendor
+*.log
