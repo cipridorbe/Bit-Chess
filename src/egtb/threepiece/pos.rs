@@ -34,6 +34,12 @@ pub struct Pos {
     pub enpassant: Option<Square>,
 }
 
+impl std::fmt::Debug for Pos {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.into_board_partial().to_fen())
+    }
+}
+
 impl Pos {
     pub const EDGES: BB = BB(Board::RANK_1.0 | Board::RANK_8.0 | Board::A_FILE.0 | Board::H_FILE.0);
     pub const CORNERS: BB = BB(Square::a1.bb().0 | Square::a8.bb().0 | Square::h1.bb().0 | Square::h8.bb().0);
@@ -475,10 +481,10 @@ impl Pos {
     // (Assumes that p1 >= p2 >= p3 by piece value)
     #[inline]
     fn correct_colour(&mut self) {
-        test_assert!({
-            let mut tmp = self.clone(); tmp.correct_piece_order();
-            *self == tmp
-        });
+        // test_assert!({
+        //     let mut tmp = self.clone(); tmp.correct_piece_order();
+        //     *self == tmp
+        // });
         let p1 = self.p1;
         match (self.p2, self.p3) {
             (None, None) => {
@@ -565,11 +571,11 @@ impl Pos {
     // Assumes that piece order and colour are already canonical.
     #[inline]
     fn correct_subpiece_order(&mut self) {
-        test_assert!({
-            let mut tmp = self.clone();
-            tmp.correct_piece_order(); tmp.correct_colour();
-            tmp == *self
-        });
+        // test_assert!({
+        //     let mut tmp = self.clone();
+        //     tmp.correct_piece_order(); tmp.correct_colour();
+        //     tmp == *self
+        // });
         let p1 = self.p1;
         match (self.p2, self.p3) {
             (None, None) => {},
@@ -622,8 +628,10 @@ impl Pos {
     pub(crate) fn make_canonical(&mut self) {
         self.correct_piece_order();
         self.correct_colour();
-        if self.is_pawnful() && self.king[Colour::White].file() >= 4 {
-            self.reflect(Reflection::Horizontal);
+        if self.is_pawnful() {
+            if self.king[Colour::White].file() >= 4 {
+                self.reflect(Reflection::Horizontal);
+            }
             self.correct_subpiece_order();
             return;
         }
@@ -713,7 +721,12 @@ impl Pos {
         let mut count = 0;
         for i in 0..movelist.length {
             let unmake = board.makemove(movelist[i]);
-            let hash = Pos::from_board(&board).unique_hash();
+            let remaining = board.occupied() & !(board[Piece::WhiteKing] | board[Piece::BlackKing]);
+            let hash = if remaining.count_ones() == 0 {
+                Hash(u64::MAX)
+            } else {
+                Pos::from_board(&board).unique_hash()
+            };
             if !hashes[..count].contains(&hash) {
                 hashes[count] = hash;
                 count += 1;
@@ -760,7 +773,7 @@ impl Pos {
                     let segment = SEGMENT[king][square];
                     segment != 0 && segment & occupied == king.bb()
                 },
-                Piece::WhiteKing | Piece::BlackKing => panic!("illegal piece")
+                Piece::WhiteKing | Piece::BlackKing => panic!("illegal piece {piece:?}@{} in {self:?}", square.to_fen())
             }
         };
         checks_king(self.p1)

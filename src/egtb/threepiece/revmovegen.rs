@@ -60,7 +60,7 @@ impl Pos {
         let include_uncaptures = self.p3.is_none();
         let colour = self.last_moved;
         if !piece.is_pawn() {
-            let targets = Pos::non_pawn_king_targets(source, piece, occupied);
+            let targets = Pos::non_pawn_king_targets(source, piece, occupied) & !occupied;
             self.add_non_pawn_king_moves(revmovelist, targets, source, include_uncaptures, moving);
             self.generate_unpromotions(revmovelist, source, moving, include_uncaptures);
         } else {
@@ -203,10 +203,12 @@ impl Pos {
                 revmovelist.add(revmove);
             }
         } else {
+            let original_to = revmove.to;
             for reflection in [None, Some(Reflection::Vertical), Some(Reflection::Diagonal), Some(Reflection::Rotation)] {
                 let new_square = reflect_sq(source, reflection);
                 if new_square.rank() != 0 && new_square.rank() != 7 {
                     revmove.reflection = reflection;
+                    revmove.to = reflect_sq(original_to, reflection);
                     revmovelist.add(revmove);
                 }
             }

@@ -1,0 +1,80 @@
+warning: `C:\Users\CiprianoDorbessan\.cargo\config` is deprecated in favor of `config.toml`
+  |
+  = help: if you need to support cargo 1.38 or earlier, you can symlink `config` to `config.toml`
+warning: unexpected `cfg` condition name: `fuzzing`
+  --> vendor\shakmaty-syzygy\src\lib.rs:39:17
+   |
+39 | #![cfg_attr(not(fuzzing), warn(missing_docs))]
+   |                 ^^^^^^^
+   |
+   = help: expected names are: `docsrs`, `feature`, and `test` and 32 more
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(fuzzing)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+   = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unexpected `cfg` condition name: `docs_rs`
+  --> vendor\shakmaty-syzygy\src\lib.rs:41:13
+   |
+41 | #![cfg_attr(docs_rs, feature(doc_auto_cfg))]
+   |             ^^^^^^^ help: there is a config with a similar name: `docsrs`
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docs_rs)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(docs_rs)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `fuzzing`
+  --> vendor\shakmaty-syzygy\src\lib.rs:50:7
+   |
+50 | #[cfg(fuzzing)]
+   |       ^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(fuzzing)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: unexpected `cfg` condition name: `fuzzing`
+  --> vendor\shakmaty-syzygy\src\lib.rs:52:7
+   |
+52 | #[cfg(fuzzing)]
+   |       ^^^^^^^
+   |
+   = help: consider using a Cargo feature instead
+   = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+            [lints.rust]
+            unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
+   = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(fuzzing)");` to the top of the `build.rs`
+   = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+
+warning: missing documentation for a method
+   --> vendor\shakmaty-syzygy\src\tablebase.rs:552:5
+    |
+552 |     pub fn probe_wdl_table(&self, pos: &S) -> SyzygyResult<Wdl> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+note: the lint level is defined here
+   --> vendor\shakmaty-syzygy\src\lib.rs:39:32
+    |
+ 39 | #![cfg_attr(not(fuzzing), warn(missing_docs))]
+    |                                ^^^^^^^^^^^^
+
+warning: `shakmaty-syzygy` (lib) generated 5 warnings
+    Finished `release` profile [optimized] target(s) in 0.13s
+     Running unittests src\lib.rs (target\release\deps\bitchess-eb2494d048b6ebd9.exe)
+
+running 1 test
+test egtb::threepiece::generator::iter_bench::bench_enumeration has been running for over 60 seconds
+enumerated 26982602812 (king,p1,p2,p3) tuples in 110.056s (245171172/s)
+test egtb::threepiece::generator::iter_bench::bench_enumeration ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 95 filtered out; finished in 110.06s
+
