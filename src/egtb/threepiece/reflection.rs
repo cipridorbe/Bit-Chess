@@ -84,7 +84,7 @@ const DIAGONAL: [Square; 64] = {
     out
 };
 
-// Reflection across top-left to bottom-right axis
+// 90 degree clockwise rotation: (rank,file) -> (7-file,rank)
 const ROTATION: [Square; 64] = {
     let mut out = [Square::a1; 64];
     let mut i = 0;

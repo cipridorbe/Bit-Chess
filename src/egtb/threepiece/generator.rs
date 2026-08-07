@@ -1,6 +1,6 @@
 use std::{path::Path, time::Instant, u8};
 
-use crate::{egtb::{KINGS_IDX_PAWNFUL, NUM_KINGS_PAWNFUL, threepiece::{paged::PagedFiles, pos::Pos}}, repr::{colour::Colour, piece::Piece, square::Square}, test_assert};
+use crate::{egtb::{KINGS_IDX_PAWNFUL, NUM_KINGS_PAWNFUL, threepiece::{paged::PagedFiles, pos::Pos, reachable_files::three_piece_targets, spillable::{self, SourceBudget, SpillableBucket}}}, repr::{bitboard::BB, board::Board, colour::Colour, piece::Piece, square::Square}, test_assert};
 
 const APPROX_TOTAL_SLOTS: u64 = 34_389_622_399;
 const LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
@@ -9,22 +9,35 @@ const UNTOUCHED: u8 = 0;
 const RESOLVED: u8 = 255;
 
 struct Frontier {
-    current: Vec<Vec<(Pos, Status)>>,
-    next: Vec<Vec<(Pos, Status)>>,
+    current: Vec<SpillableBucket>,
+    next: Vec<SpillableBucket>,
     active_current: Vec<usize>,
 }
 
 impl Frontier {
-    fn new(num_files: usize) -> Self {
+    // `current`/`next` ping-pong between two fixed on-disk label sets across the whole
+    // run (see advance()) rather than being recreated each layer -- by the time a bucket
+    // is handed off to become the new `next`, pop() has already fully drained it.
+    fn new(dir: &Path, num_files: usize) -> Self {
         Self {
-            current: (0..num_files).map(|_| Vec::new()).collect(),
-            next: (0..num_files).map(|_| Vec::new()).collect(),
+            current: spillable::new_buckets(dir, "a", num_files),
+            next: spillable::new_buckets(dir, "b", num_files),
             active_current: Vec::new(),
         }
     }
 
-    fn push(&mut self, file: usize, pos: Pos, status: Status) {
-        self.next[file].push((pos, status));
+    fn push(&mut self, file: usize, pos: Pos, status: Status, budget: Option<u64>) {
+        self.next[file].push(pos, status, budget);
+    }
+
+    // A target may have grown under an earlier, more generous budget and then gone
+    // quiet -- push() only re-checks on an actual push, so enforce the incoming budget
+    // on everything it governs as soon as a source becomes active.
+    fn enter_source(&mut self, budget: &SourceBudget) {
+        self.next[budget.file()].enforce_budget(budget.budget_for_target(budget.file()));
+        for target in three_piece_targets(budget.file()) {
+            self.next[target].enforce_budget(budget.budget_for_target(target));
+        }
     }
 
     fn pop(&mut self) -> Option<(Pos, Status)> {
@@ -53,12 +66,17 @@ impl Pos {
         let dir = dir.as_ref();
         let mut moves_left = PagedFiles::new(dir.join("moves_left"), "ml", Pos::NUM_FILES);
         let mut status = PagedFiles::new(dir.join("status"), "st", Pos::NUM_FILES);
-        let mut frontier = Self::init(&mut moves_left);
+        let mut frontier = Self::init(dir, &mut moves_left);
 
         let start = Instant::now();
         let mut last_log = start;
         let mut resolved: u64 = 0;
         let mut layer: u32 = 0;
+        // caches the push budget for whichever file is currently being drained --
+        // Frontier::pop() drains one file's current bucket fully before moving to the
+        // next, so this only needs recomputing when pos.file() actually changes. Seeded
+        // with an out-of-range file so the very first iteration always recomputes.
+        let mut source_budget = SourceBudget::for_file(Pos::NUM_FILES);
 
         loop {
             let Some((pos, state)) = frontier.pop() else {
@@ -80,6 +98,11 @@ impl Pos {
             let next_state = state.next();
             #[cfg(feature = "assertions")]
             let pos_debug = format!("{pos:?}");
+            let source_file = pos.file();
+            if source_budget.file() != source_file {
+                source_budget = SourceBudget::for_file(source_file);
+                frontier.enter_source(&source_budget);
+            }
             for new_pos in pos.predecessors() {
                 let (file, index) = (new_pos.file(), new_pos.index());
                 let left = moves_left.get_mut(file, index);
@@ -90,7 +113,8 @@ impl Pos {
                 *left -= 1;
                 if state.is_loss() || *left == 0 {
                     *left = RESOLVED;
-                    frontier.push(file, new_pos, next_state);
+                    let budget = source_budget.budget_for_target(file);
+                    frontier.push(file, new_pos, next_state, budget);
                 }
             }
         }
@@ -105,8 +129,8 @@ impl Pos {
     // position's children trigger that -- and draws are never popped since they're never
     // pushed), and checkmates' status is deferred to generate()'s dequeue-time write, so
     // init() only needs to seed moves_left and push checkmates into the frontier.
-    fn init(moves_left: &mut PagedFiles) -> Frontier {
-        let mut frontier = Frontier::new(Pos::NUM_FILES);
+    fn init(dir: &Path, moves_left: &mut PagedFiles) -> Frontier {
+        let mut frontier = Frontier::new(&dir.join("frontier"), Pos::NUM_FILES);
         let start = Instant::now();
         let mut last_log = start;
         let mut king_combos: u64 = 0;
@@ -139,7 +163,8 @@ impl Pos {
                                 if num_moves == 0 {
                                     if pos.in_check(!pos.last_moved) {
                                         *moves_left.get_mut(file, index) = RESOLVED;
-                                        frontier.push(file, pos.clone(), Status::CHECKMATED);
+                                        let budget = spillable::own_file_budget(file);
+                                        frontier.push(file, pos.clone(), Status::CHECKMATED, budget);
                                     }
                                     // else: draw, nothing to write (see doc comment above)
                                 } else {
@@ -170,6 +195,7 @@ impl Pos {
                 .map(move |bk| [wk, bk]))
     }
 
+    #[inline]
     fn smaller_or_equal_pieces(piece: Piece) -> &'static [Piece] {
         const QUEEN: [Piece; 10] = [Piece::WhitePawn, Piece::BlackPawn, Piece::WhiteKnight, Piece::BlackKnight, Piece::WhiteBishop, Piece::BlackBishop, Piece::WhiteRook, Piece::BlackRook, Piece::WhiteQueen, Piece::BlackQueen];
         match piece {
@@ -182,37 +208,46 @@ impl Pos {
         }
     }
 
+    #[inline]
+    // Squares a pawn can occupy (ranks 2-7) are exactly indices 8..56, since
+    // Square::rank() == self as u8 / 8 -- a contiguous slice of ALL_SQUARES.
+    fn squares_for(is_pawn: bool) -> &'static [Square] {
+        const ALL_SQUARES: [Square; 64] = {
+            let mut out = [Square::a1; 64];
+            let mut i = 0;
+            while i < 64 {
+                out[i] = Square::from_u8(i as u8);
+                i += 1;
+            }
+            out
+        };
+        if is_pawn { &ALL_SQUARES[8..56] } else { &ALL_SQUARES }
+    }
+
+    #[inline]
     // iterator over all valid p1 values, dependent on king values
     fn p1_iter(king: [Square; 2]) -> impl Iterator<Item = (Square, Piece)> {
         const P1_KINDS: [Piece; 5] = [Piece::WhitePawn, Piece::WhiteKnight, Piece::WhiteBishop, Piece::WhiteRook, Piece::WhiteQueen];
+        let empty = !(king[0].bb() | king[1].bb());
         P1_KINDS.into_iter()
-            .flat_map(move |piece| Square::all().map(move |square| (square, piece)))
-            .filter(move |(square, piece)| {
-                *square != king[0] && *square != king[1]
-                && (
-                    (*piece == Piece::WhitePawn && square.rank() > 0 && square.rank() < 7)
-                    || *piece != Piece::WhitePawn
-                )
-            })
+            .flat_map(move |piece| Self::squares_for(piece == Piece::WhitePawn).iter().copied().map(move |square| (square, piece)))
+            .filter(move |(square, _)| square.bb() & empty != 0)
     }
 
+    #[inline]
     // iterator over all valid p2 values, dependent on king and p1
     fn p2_iter(king: [Square; 2], p1: (Square, Piece)) -> impl Iterator<Item = Option<(Square, Piece)>> {
         let above_diagonal = { let (rank, file) = king[Colour::White].rank_file(); rank > file };
+        let empty = !(king[0].bb() | king[1].bb() | p1.0.bb());
         let some_iter = Self::smaller_or_equal_pieces(p1.1).iter().copied()
-            .flat_map(move |piece| Square::all().map(move |square| (square, piece)))
-            .filter(move |(square, piece)| {
-                *square != king[0] && *square != king[1] && *square != p1.0
-                && (
-                    (piece.is_pawn() && square.rank() > 0 && square.rank() < 7)
-                    || !piece.is_pawn()
-                )
-            })
+            .flat_map(move |piece| Self::squares_for(piece.is_pawn()).iter().copied().map(move |square| (square, piece)))
+            .filter(move |(square, _)| square.bb() & empty != 0)
             .map(|p2| Some(p2));
         let none_option = if above_diagonal && p1.1 != Piece::WhitePawn { None } else { Some(None) };
         none_option.into_iter().chain(some_iter)
     }
 
+    #[inline]
     // iterator over all valid p3 values, dependent on king, p1, and p2
     fn p3_iter(king: [Square; 2], p1: (Square, Piece), p2: Option<(Square, Piece)>) -> impl Iterator<Item = Option<(Square, Piece)>> {
         let above_diagonal = { let (rank, file) = king[Colour::White].rank_file(); rank > file };
@@ -221,15 +256,10 @@ impl Pos {
         let some_iter = p2.into_iter()
             .flat_map(move |p2| {
                 let pieces = if must_be_pawn { Self::smaller_or_equal_pieces(Piece::WhitePawn) } else { Self::smaller_or_equal_pieces(p2.1) };
+                let empty = !(king[0].bb() | king[1].bb() | p1.0.bb() | p2.0.bb());
                 pieces.iter().copied()
-                    .flat_map(move |piece| Square::all().map(move |square| (square, piece)))
-                    .filter(move |(square, piece)| {
-                        *square != king[0] && *square != king[1] && *square != p1.0 && *square != p2.0
-                        && (
-                            (piece.is_pawn() && square.rank() > 0 && square.rank() < 7)
-                            || (!piece.is_pawn() && !above_diagonal)
-                        )
-                    })
+                    .flat_map(move |piece| Self::squares_for(piece.is_pawn()).iter().copied().map(move |square| (square, piece)))
+                    .filter(move |(square, _)| square.bb() & empty != 0)
             })
             .map(|p3| Some(p3));
         let none_option = if must_be_pawn { None } else { Some(None) };
@@ -239,6 +269,13 @@ impl Pos {
     // at most 3 candidate enpassant squares, one per piece that could be the pawn that
     // just double-pushed (right colour, right rank)
     pub(crate) fn enpassant_candidates(pos: &Pos) -> [Option<Square>; 3] {
+        let has_both_colours = pos.p2.is_some_and(|p2| p2.1.is_pawn()) && {
+            let pieces = || std::iter::once(pos.p1).chain(pos.p2).chain(pos.p3);
+            pieces().any(|(_, p)| p == Piece::WhitePawn) && pieces().any(|(_, p)| p == Piece::BlackPawn)
+        };
+        if !has_both_colours {
+            return [None, None, None];
+        }
         let (ep_rank, pawn_rank, pawn_piece) = match pos.last_moved {
             Colour::White => (2, 3, Piece::WhitePawn),
             Colour::Black => (5, 4, Piece::BlackPawn),
@@ -288,6 +325,11 @@ impl Status {
     pub fn is_loss(self) -> bool {
         self.0 < 0 && self != Self::UNKOWN
     }
+
+    // For on-disk spilling (see spillable.rs) -- #[repr(transparent)] over i8 already
+    // guarantees this is just a reinterpret, these just avoid exposing the field itself.
+    pub(crate) fn to_byte(self) -> u8 { self.0 as u8 }
+    pub(crate) fn from_byte(b: u8) -> Self { Self(b as i8) }
 }
 
 #[cfg(test)]
@@ -831,5 +873,237 @@ mod iter_bench {
         let elapsed = start.elapsed();
         println!("enumerated {count} (king,p1,p2,p3) tuples in {:.3}s ({:.0}/s)",
             elapsed.as_secs_f64(), count as f64 / elapsed.as_secs_f64());
+    }
+
+    #[test]
+    fn bench_enumeration_with_enpassant() {
+        let start = Instant::now();
+        let mut count: u64 = 0;
+        for last_moved in Pos::last_moved_iter() {
+            for king in Pos::king_iter() {
+                for p1 in Pos::p1_iter(king) {
+                    for p2 in Pos::p2_iter(king, p1) {
+                        for p3 in Pos::p3_iter(king, p1, p2) {
+                            let pos = Pos { last_moved, king, p1, p2, p3, enpassant: None };
+                            for ep in Pos::enpassant_iter(pos.clone()) {
+                                count += black_box(1u64);
+                                black_box(ep);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let elapsed = start.elapsed();
+        println!("enumerated {count} (king,p1,p2,p3,ep) tuples in {:.3}s ({:.0}/s)",
+            elapsed.as_secs_f64(), count as f64 / elapsed.as_secs_f64());
+    }
+}
+
+#[cfg(test)]
+mod reachability {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    // File-level reachability (via predecessors -- i.e. unpromotions from 3-piece positions
+    // and uncaptures from 1/2-piece positions) doesn't depend on king position at all -- only
+    // on piece types and whether a piece can reach an edge square, which is unaffected by
+    // where the kings sit as long as they don't occupy an edge square themselves. So a single
+    // off-edge king pair (rather than all 1806 from king_iter()) gives the same answer without
+    // the ~1806x cost of sweeping every king position -- white king strictly below the diagonal
+    // (rank < file) so it stays put under make_canonical, and off the diagonal so the "both
+    // kings on diagonal" tie-break never triggers.
+    //
+    // A single sweep over p1 x p2 x p3 (each possibly None, per the iterators) covers every
+    // piece count (1, 2, and 3 non-king pieces) in one pass, so one table serves both the
+    // 3-piece unpromotion-target budget and the 1/2-piece uncapture-target budget.
+    #[test]
+    fn compute() {
+        let king = [Square::c2, Square::f6];
+        assert_ne!(KINGS_IDX_PAWNFUL[king[0]][king[1]], u16::MAX, "king pair must be valid");
+
+        let mut reachable: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        let mut checked = 0u64;
+        for last_moved in Pos::last_moved_iter() {
+            for p1 in Pos::p1_iter(king) {
+                for p2 in Pos::p2_iter(king, p1) {
+                    for p3 in Pos::p3_iter(king, p1, p2) {
+                        let mut pos = Pos { last_moved, king, p1, p2, p3, enpassant: None };
+                        let hash = pos.unique_hash();
+                        pos.make_canonical();
+                        if hash != pos.unique_hash() || pos.in_check(pos.last_moved) { continue; }
+                        checked += 1;
+                        let file = pos.file();
+                        for pred in pos.clone().predecessors() {
+                            let pf = pred.file();
+                            if pf != file {
+                                reachable.entry(file).or_default().insert(pf);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("checked {checked} canonical positions");
+        let mut max_targets = 0;
+        for (file, targets) in &reachable {
+            max_targets = max_targets.max(targets.len());
+            println!("file {file}: reachable -> {targets:?}");
+        }
+        println!("files with reachable targets: {}, max targets from one file: {max_targets}", reachable.len());
+    }
+
+    // Cross-check for Pos::piece_count_for_file(): its decode-from-file-index logic must
+    // agree with directly counting how many of p1/p2/p3 are present, for every canonical
+    // position this generator can actually produce.
+    #[test]
+    fn piece_count_for_file_matches_actual_positions() {
+        let king = [Square::c2, Square::f6];
+        for last_moved in Pos::last_moved_iter() {
+            for p1 in Pos::p1_iter(king) {
+                for p2 in Pos::p2_iter(king, p1) {
+                    for p3 in Pos::p3_iter(king, p1, p2) {
+                        let pos = Pos { last_moved, king, p1, p2, p3, enpassant: None };
+                        let expected = 1 + p2.is_some() as u8 + p3.is_some() as u8;
+                        assert_eq!(Pos::piece_count_for_file(pos.file()), expected,
+                            "file={} has_p2={} has_p3={}", pos.file(), p2.is_some(), p3.is_some());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod enpassant_crash_repro {
+    use super::*;
+
+    #[test]
+    fn trace_enpassant_uncapture_predecessor() {
+        let mut c = Pos {
+            king: [Square::a1, Square::h8],
+            p1: (Square::a8, Piece::WhiteQueen),
+            p2: Some((Square::d6, Piece::WhitePawn)),
+            p3: None,
+            last_moved: Colour::White,
+            enpassant: None,
+        };
+        c.make_canonical();
+        let dump = |p: &Pos| format!(
+            "fen={p:?} king=[{},{}] p1=({},{}) p2={:?} p3={:?} last_moved={} enpassant={:?}",
+            p.king[0] as u8, p.king[1] as u8, p.p1.0 as u8, p.p1.1 as u8,
+            p.p2.map(|(sq, pc)| (sq as u8, pc as u8)),
+            p.p3.map(|(sq, pc)| (sq as u8, pc as u8)),
+            p.last_moved as u8, p.enpassant.map(|sq| sq as u8));
+        println!("c: {}", dump(&c));
+        for pred in c.clone().predecessors() {
+            println!("pred: {}", dump(&pred));
+        }
+    }
+
+    // Forces the enpassant-candidate INJECTION path (not the direct en-passant-uncapture
+    // path): C has a queen (so plenty of quiet reverse moves) plus two already-placed
+    // opposite-colour pawns positioned so that, after undoing a quiet queen move, the
+    // resulting predecessor's own pawns satisfy enpassant_possible(). The white king sits
+    // on a file >= 4, so reaching canonical form requires a Horizontal reflection --
+    // exactly the condition needed to expose the double-transform bug.
+    #[test]
+    fn injected_enpassant_predecessors_are_self_consistent() {
+        let mut c = Pos {
+            king: [Square::e1, Square::e8],
+            p1: (Square::h1, Piece::WhiteQueen),
+            p2: Some((Square::d5, Piece::WhitePawn)),
+            p3: Some((Square::e5, Piece::BlackPawn)),
+            last_moved: Colour::White,
+            enpassant: None,
+        };
+        c.make_canonical();
+        println!("c: {c:?} last_moved={} king=[{},{}]", c.last_moved as u8, c.king[0] as u8, c.king[1] as u8);
+
+        let mut found_ep = 0;
+        for pred in c.clone().predecessors() {
+            if pred.enpassant.is_none() { continue; }
+            found_ep += 1;
+            println!("pred: {pred:?} last_moved={} enpassant={:?}", pred.last_moved as u8, pred.enpassant.map(|s| s as u8));
+
+            // Re-derive what generate_revmovelist()'s ep branch would look for, and check
+            // that piece actually exists and is the correct colour's pawn -- this is
+            // exactly the invariant that was violated in the original crash.
+            let ep = pred.enpassant.unwrap() as u8;
+            let source = match pred.last_moved {
+                Colour::White => ep + 8,
+                Colour::Black => ep - 8,
+            };
+            let pawn = Piece::pawn(pred.last_moved);
+            let pieces = [Some(pred.p1), pred.p2, pred.p3];
+            let piece_at_source = pieces.into_iter().flatten().find(|(sq, _)| *sq as u8 == source);
+            assert_eq!(piece_at_source.map(|(_, p)| p), Some(pawn),
+                "ep={ep} source={source} should hold {pawn:?} but found {:?} in {pred:?}",
+                piece_at_source.map(|(sq, p)| (sq as u8, p as u8)));
+        }
+        assert!(found_ep > 0, "test didn't actually exercise the injection path");
+    }
+}
+
+// spillable::MB is scaled down under cfg(test), so these budgets (computed the same way
+// as SourceBudget does internally) are small enough to force real spilling here.
+#[cfg(test)]
+mod frontier_integration {
+    use super::*;
+
+    fn junk_pos(seed: u32) -> Pos {
+        Pos {
+            king: [Square::c2, Square::f6],
+            p1: (Square::from_u8((seed % 64) as u8), Piece::WhiteQueen),
+            p2: None,
+            p3: None,
+            last_moved: if seed % 2 == 0 { Colour::White } else { Colour::Black },
+            enpassant: None,
+        }
+    }
+
+    #[test]
+    fn routes_and_recovers_pushes_per_bucket_under_real_budgets() {
+        let dir = std::env::temp_dir().join("bitchess_frontier_integration_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut frontier = Frontier::new(&dir, Pos::NUM_FILES);
+
+        // 132: 3-piece, one target (121). 131: 2-piece, several targets including one
+        // low-piece (10, unlimited) and several 3-piece ones. 604: 1-piece, zero 3-piece
+        // targets -- own file only.
+        let sources = [132usize, 131, 604];
+        let mut pushed_per_file: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
+        let mut source_budget = SourceBudget::for_file(Pos::NUM_FILES);
+
+        for &source in &sources {
+            source_budget = SourceBudget::for_file(source);
+            frontier.enter_source(&source_budget);
+
+            let mut push_to = |frontier: &mut Frontier, file: usize, n: u32, pushed: &mut std::collections::HashMap<usize, u32>| {
+                let budget = source_budget.budget_for_target(file);
+                for i in 0..n {
+                    frontier.push(file, junk_pos(i), Status::from_byte((i % 200) as u8), budget);
+                }
+                *pushed.entry(file).or_default() += n;
+            };
+            push_to(&mut frontier, source, 3000, &mut pushed_per_file);
+            for target in three_piece_targets(source) {
+                push_to(&mut frontier, target, 3000, &mut pushed_per_file);
+            }
+        }
+
+        // at least one budgeted bucket must have actually spilled to disk -- otherwise
+        // this test isn't exercising the thing it's meant to.
+        let any_spilled = pushed_per_file.keys().any(|&f| frontier.next[f].spilled_bytes() > 0);
+        assert!(any_spilled, "expected at least one bucket to spill under test-scaled budgets");
+
+        assert!(frontier.advance(), "expected non-empty frontier after pushing");
+
+        for (&file, &expected) in &pushed_per_file {
+            let mut count = 0u32;
+            while frontier.current[file].pop().is_some() { count += 1; }
+            assert_eq!(count, expected, "file {file}: pushed {expected}, popped {count}");
+        }
+        assert!(!frontier.advance(), "expected frontier to be empty after draining everything pushed");
     }
 }

@@ -194,6 +194,15 @@ impl Pos {
 
     pub(crate) const NUM_FILES: usize = 5 * 11 * 11 + 10 * 11 + 10;
 
+    // Number of non-king pieces (1-3) encoded by a file() value -- p1 is always present,
+    // so v2==10 (None) means p2 (and thus p3) are absent, v3==10 alone means only p3 is
+    // absent, and otherwise all three slots are occupied. Mirrors file()'s own encoding.
+    pub(crate) fn piece_count_for_file(file: usize) -> u8 {
+        let v2 = (file / 11) % 11;
+        let v3 = file % 11;
+        if v2 == 10 { 1 } else if v3 == 10 { 2 } else { 3 }
+    }
+
     pub(crate) fn index(&self) -> usize {
         let king_idx = if self.is_pawnful() {
             KINGS_IDX_PAWNFUL[self.king[Colour::White]][self.king[Colour::Black]]
@@ -819,7 +828,8 @@ impl Pos {
             revmovelist: self.generate_revmovelist(),
             pos: self,
             hashes: [Hash(0); RevMoveList::MAX_MOVES],
-            index: 0
+            index: 0,
+            pending_ep: [const { None }; 2],
         }
     }
 }
@@ -828,12 +838,19 @@ struct PosIter {
     pos: Pos,
     revmovelist: RevMoveList,
     hashes: [Hash; RevMoveList::MAX_MOVES],
-    index: usize
+    index: usize,
+    pending_ep: [Option<Pos>; 2],
 }
 
 impl Iterator for PosIter {
     type Item = Pos;
     fn next(&mut self) -> Option<Self::Item> {
+        if self.pending_ep[0].is_some() {
+            return self.pending_ep[0].take();
+        }
+        if self.pending_ep[1].is_some() {
+            return self.pending_ep[1].take();
+        }
         if self.index >= self.revmovelist.length {
             return None;
         }
@@ -853,11 +870,13 @@ impl Iterator for PosIter {
         }
 
         if revmove.enpassant.is_none() {
+            let mut slot = 0;
             for candidate in Pos::enpassant_candidates(&pos).into_iter().flatten() {
                 if pos.enpassant_possible(candidate, pos.last_moved) {
-                    let mut ep_revmove = revmove;
-                    ep_revmove.enpassant = Some(candidate);
-                    self.revmovelist.add(ep_revmove);
+                    let mut ep_pos = pos.clone();
+                    ep_pos.enpassant = Some(candidate);
+                    self.pending_ep[slot] = Some(ep_pos);
+                    slot += 1;
                 }
             }
         }
@@ -906,5 +925,19 @@ mod index_bijection_tests {
             }
             assert!(seen.iter().all(|&s| s), "n={n}: not all {total} slots covered");
         }
+    }
+}
+
+#[cfg(test)]
+mod piece_count_for_file_tests {
+    use super::*;
+
+    #[test]
+    fn matches_known_files() {
+        assert_eq!(Pos::piece_count_for_file(0), 3);   // WP, WP, WP
+        assert_eq!(Pos::piece_count_for_file(10), 2);  // WP, WP
+        assert_eq!(Pos::piece_count_for_file(120), 1); // WP
+        assert_eq!(Pos::piece_count_for_file(121), 3); // WN, WP, WP
+        assert_eq!(Pos::piece_count_for_file(604), 1); // WQ
     }
 }

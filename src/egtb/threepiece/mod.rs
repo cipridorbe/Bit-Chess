@@ -2,6 +2,8 @@ pub mod generator;
 pub mod makerevmove;
 pub(crate) mod paged;
 pub mod pos;
+pub(crate) mod reachable_files;
 pub mod reflection;
 pub mod revmove;
 pub mod revmovegen;
+pub(crate) mod spillable;
